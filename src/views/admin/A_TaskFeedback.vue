@@ -169,9 +169,18 @@ async function handleSubmitOutput() {
       content: outputContent.value.trim(),
       subtask_id: selectedSubtaskId.value
     })
+    
+    // Reload task to check status after submit-output
+    await loadTask()
+    
+    // For daily_management tasks that went to review (leader/admin initiated), auto-approve
+    if (task.value.task_type === 'daily_management' && task.value.status === 'review') {
+      await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务自动通过' })
+      await loadTask()
+    }
+    
     outputContent.value = ''
     selectedSubtaskId.value = null
-    await loadTask()
   } catch (e) {
     alert(e.message)
   } finally {

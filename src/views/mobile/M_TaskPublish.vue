@@ -60,7 +60,7 @@
         <label class="form-label">指派执行人 *</label>
         <select class="form-select" v-model="form.assignee_id">
           <option :value="null" disabled>请选择执行人</option>
-          <option v-for="u in allUsers" :key="u.id" :value="u.id">
+          <option v-for="u in techQualityUsers" :key="u.id" :value="u.id">
             {{ u.name }}{{ u.title ? ' - ' + u.title : '' }}
           </option>
         </select>
@@ -80,7 +80,13 @@
 
       <!-- Deadline (project and key_work) -->
       <div v-if="form.flow_type && form.flow_type !== 'daily_management'" class="form-group">
-        <label class="form-label">截止日期</label>
+        <label class="form-label">截止日期 <span class="required">*</span></label>
+        <input class="form-input" type="date" v-model="form.deadline" />
+      </div>
+
+      <!-- Deadline (daily_management) -->
+      <div v-if="form.flow_type === 'daily_management'" class="form-group">
+        <label class="form-label">截止日期 <span class="required">*</span></label>
         <input class="form-input" type="date" v-model="form.deadline" />
       </div>
 
@@ -112,16 +118,20 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { taskAPI, userAPI } from '../../api/index.js'
-import { authStore } from '../../store/auth.js'
+import { authStore, canCreateProjectTask, canCreateKeyWorkTask, canCreateDailyManagementTask } from '../../store/auth.js'
 
 const router = useRouter()
 const publishing = ref(false)
 const showSuccess = ref(false)
 const allUsers = ref([])
 
+const techQualityUsers = computed(() => {
+  return allUsers.value.filter(u => u.department === '技术质量部')
+})
+
 const allFlowTypes = [
-  { value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析', color: '#1677ff', roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality'] },
-  { value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人', color: '#13c2c2', roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality'] },
+  { value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析', color: '#1677ff', roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'] },
+  { value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人', color: '#13c2c2', roles: ['admin', 'leader'] },
   { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理', color: '#faad14', roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality'] }
 ]
 const flowTypes = computed(() => {
@@ -162,6 +172,7 @@ function selectFlow(value) {
 
 const isValid = computed(() => {
   if (!form.flow_type) return false
+  if (!form.deadline) return false  // Deadline required for ALL flows
   if (form.flow_type === 'project') {
     return form.task_type && form.title.trim() && form.description.trim()
   }
@@ -247,4 +258,5 @@ onMounted(async () => {
   border-radius: 8px; font-size: 13px; cursor: pointer; transition: all 0.2s;
 }
 .dict-item.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.required { color: var(--danger); }
 </style>

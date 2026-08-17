@@ -185,6 +185,30 @@ router.post('/', authMiddleware, (req, res) => {
     return res.status(400).json({ error: '请选择任务类型' })
   }
 
+  // Role-based validation for task creation
+  const userRole = req.user.role
+  if (task_type === 'self_repair' || task_type === 'rectification' || task_type === 'quality_analysis') {
+    // Project tasks: only leader, supervisor_tech, supervisor_quality, admin
+    const allowedRoles = ['leader', 'supervisor_tech', 'supervisor_quality', 'admin']
+    if (!allowedRoles.includes(userRole)) {
+      return res.status(403).json({ error: '权限不足：项目任务只能由领导、技术主管、质量主管或管理员发起' })
+    }
+  } else if (task_type === 'key_work') {
+    // Key work: only leader, admin
+    const allowedRoles = ['leader', 'admin']
+    if (!allowedRoles.includes(userRole)) {
+      return res.status(403).json({ error: '权限不足：部门重点工作只能由领导或管理员发起' })
+    }
+  } else if (task_type === 'daily_management') {
+    // Daily management: all roles allowed (staff_tech, staff_quality, supervisor_tech, supervisor_quality, leader, admin)
+    // No restriction needed - all authenticated users can create
+  }
+
+  // Deadline is required for all task types
+  if (!deadline) {
+    return res.status(400).json({ error: '截止日期为必填项' })
+  }
+
   const db = getDB()
   const publisherId = req.user.id
 
@@ -397,12 +421,36 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
   db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "output", ?)',
     [id, userId, `提交输出物: ${content}`])
 
-  // For key_work and daily_management: move to review status after output submitted
-  const taskRow = db.prepare('SELECT task_type, status FROM tasks WHERE id = ?')
+  // Check task info including publisher role
+  const taskRow = db.prepare('SELECT task_type, status, publisher_id FROM tasks WHERE id = ?')
   taskRow.bind([id])
   const tInfo = taskRow.step() ? taskRow.getAsObject() : null
   taskRow.free()
-  if (tInfo && (tInfo.task_type === 'key_work' || tInfo.task_type === 'daily_management' || tInfo.status === 'overdue') && tInfo.status !== 'review') {
+  
+  if (tInfo && tInfo.task_type === 'daily_management' && tInfo.status !== 'review') {
+    // Check if publisher is one of the 4 roles that should skip review
+    let shouldAutoComplete = false
+    if (tInfo.publisher_id) {
+      const pubStmt = db.prepare('SELECT role FROM users WHERE id = ?')
+      pubStmt.bind([tInfo.publisher_id])
+      const publisher = pubStmt.step() ? pubStmt.getAsObject() : null
+      pubStmt.free()
+      if (publisher && ['staff_tech', 'staff_quality', 'supervisor_tech', 'supervisor_quality'].includes(publisher.role)) {
+        shouldAutoComplete = true
+      }
+    }
+    
+    if (shouldAutoComplete) {
+      // Directly complete for daily_management initiated by the 4 roles
+      db.run('UPDATE tasks SET status = "completed", progress = 100, completed_at = datetime("now","localtime"), updated_at = datetime("now","localtime") WHERE id = ?', [id])
+      db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "approved", ?)',
+        [id, userId, '日常管理任务自动完成'])
+    } else {
+      // For leader/admin initiated daily_management, go to review
+      db.run('UPDATE tasks SET status = "review", updated_at = datetime("now","localtime") WHERE id = ?', [id])
+    }
+  } else if (tInfo && (tInfo.task_type === 'key_work' || tInfo.status === 'overdue') && tInfo.status !== 'review') {
+    // For key_work and overdue tasks: move to review status
     db.run('UPDATE tasks SET status = "review", updated_at = datetime("now","localtime") WHERE id = ?', [id])
   }
 

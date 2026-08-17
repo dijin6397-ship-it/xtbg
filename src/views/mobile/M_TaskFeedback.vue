@@ -73,7 +73,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { store, addFeedback } from '../../store/tasks.js'
+import { store, addFeedback, updateTaskStatus } from '../../store/tasks.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -114,6 +114,12 @@ function handleSubmit() {
   if (!outputContent.value.trim() || !task.value) return
 
   addFeedback(task.value.id, { type: 'output', content: outputContent.value.trim() })
+
+  // For daily_management tasks, directly complete without review
+  if (task.value.task_type === 'daily_management') {
+    // Mark task as completed directly
+    updateTaskStatus(task.value.id, 'completed')
+  }
 
   outputContent.value = ''
   router.push(`/m/task/${task.value.id}`)

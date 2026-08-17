@@ -10,7 +10,7 @@
             <label class="form-label">任务流程 <span class="required">*</span></label>
             <div class="flow-cards">
               <div
-                v-for="f in flowTypes"
+                v-for="f in availableFlowTypes"
                 :key="f.value"
                 class="type-card"
                 :class="{ active: form.flow_type === f.value }"
@@ -74,7 +74,7 @@
             <label class="form-label">指派执行人 <span class="required">*</span></label>
             <select v-model="form.assignee_id" class="form-select">
               <option :value="null" disabled>请选择执行人</option>
-              <option v-for="u in allUsers" :key="u.id" :value="u.id">
+              <option v-for="u in techQualityUsers" :key="u.id" :value="u.id">
                 {{ u.name }}{{ u.title ? ' - ' + u.title : '' }}{{ u.department ? ' (' + u.department + ')' : '' }}
               </option>
             </select>
@@ -94,7 +94,13 @@
 
           <!-- Deadline (project and key_work flows) -->
           <div v-if="form.flow_type && form.flow_type !== 'daily_management'" class="form-group">
-            <label class="form-label">截止日期</label>
+            <label class="form-label">截止日期 <span class="required">*</span></label>
+            <input v-model="form.deadline" type="date" class="form-input" />
+          </div>
+
+          <!-- Deadline (daily_management) -->
+          <div v-if="form.flow_type === 'daily_management'" class="form-group">
+            <label class="form-label">截止日期 <span class="required">*</span></label>
             <input v-model="form.deadline" type="date" class="form-input" />
           </div>
         </div>
@@ -220,29 +226,42 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { taskAPI, userAPI } from '../../api/index.js'
-import { authStore } from '../../store/auth.js'
+import { authStore, canCreateProjectTask, canCreateKeyWorkTask, canCreateDailyManagementTask } from '../../store/auth.js'
 
 const router = useRouter()
 const publishing = ref(false)
 const allUsers = ref([])
 
+const techQualityUsers = computed(() => {
+  return allUsers.value.filter(u => u.department === '技术质量部')
+})
+
 const flowTypes = [
   {
     value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析',
     bg: '#e6f4ff', color: '#1677ff',
-    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>'
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>',
+    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality']
   },
   {
     value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人',
     bg: '#e6fffb', color: '#13c2c2',
-    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>'
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+    roles: ['admin', 'leader']
   },
   {
     value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理',
     bg: '#fffbe6', color: '#faad14',
-    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality']
   }
 ]
+
+const availableFlowTypes = computed(() => {
+  const role = authStore.user?.role
+  if (!role) return []
+  return flowTypes.filter(f => f.roles.includes(role))
+})
 
 const projectTypes = [
   {
@@ -294,6 +313,7 @@ function selectFlow(value) {
 
 const isValid = computed(() => {
   if (!form.flow_type) return false
+  if (!form.deadline) return false  // Deadline required for ALL flows
   if (form.flow_type === 'project') {
     return form.task_type && form.title.trim() && form.description.trim()
   }
