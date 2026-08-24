@@ -47,25 +47,27 @@
     <TaskCard v-for="t in overdueTasks" :key="t.id" :task="t" @click="goTask(t.id)" />
 
     <!-- Urge Action -->
-    <div v-if="showUrge" class="slide-panel">
-      <div class="slide-overlay" @click="showUrge = false"></div>
-      <div class="slide-content" style="padding:24px">
-        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px">\u53D1\u9001\u50AC\u529E\u901A\u77E5</h3>
-        <div class="form-group">
-          <label class="form-label">\u50AC\u529E\u5185\u5BB9</label>
-          <textarea class="form-textarea" v-model="urgeMsg" placeholder="\u8BF7\u8F93\u5165\u50AC\u529E\u5185\u5BB9"></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">\u7D27\u6025\u7A0B\u5EA6</label>
-          <div style="display:flex;gap:8px">
-            <span class="filter-tab" :class="{ active: urgeType === 'urge' }" @click="urgeType = 'urge'">\u50AC\u529E</span>
-            <span class="filter-tab" :class="{ active: urgeType === 'warn' }" @click="urgeType = 'warn'">\u8B66\u544A</span>
-            <span class="filter-tab" :class="{ active: urgeType === 'escalate' }" @click="urgeType = 'escalate'">\u5347\u7EA7</span>
+    <Teleport to="body">
+      <div v-if="showUrge" class="slide-panel">
+        <div class="slide-overlay" @click="showUrge = false"></div>
+        <div class="slide-content" style="padding:24px">
+          <h3 style="font-size:16px;font-weight:600;margin-bottom:16px">\u53D1\u9001\u50AC\u529E\u901A\u77E5</h3>
+          <div class="form-group">
+            <label class="form-label">\u50AC\u529E\u5185\u5BB9</label>
+            <textarea class="form-textarea" v-model="urgeMsg" placeholder="\u8BF7\u8F93\u5165\u50AC\u529E\u5185\u5BB9"></textarea>
           </div>
+          <div class="form-group">
+            <label class="form-label">\u7D27\u6025\u7A0B\u5EA6</label>
+            <div style="display:flex;gap:8px">
+              <span class="filter-tab" :class="{ active: urgeType === 'urge' }" @click="urgeType = 'urge'">\u50AC\u529E</span>
+              <span class="filter-tab" :class="{ active: urgeType === 'warn' }" @click="urgeType = 'warn'">\u8B66\u544A</span>
+              <span class="filter-tab" :class="{ active: urgeType === 'escalate' }" @click="urgeType = 'escalate'">\u5347\u7EA7</span>
+            </div>
+          </div>
+          <button class="btn btn-primary" @click="sendUrge">\u53D1\u9001\u901A\u77E5</button>
         </div>
-        <button class="btn btn-primary" @click="sendUrge">\u53D1\u9001\u901A\u77E5</button>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 

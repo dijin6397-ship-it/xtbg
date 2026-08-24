@@ -241,7 +241,7 @@ const flowTypes = [
     value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析',
     bg: '#e6f4ff', color: '#1677ff',
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>',
-    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality']
+    roles: ['admin', 'supervisor_tech', 'supervisor_quality']
   },
   {
     value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人',

@@ -12,7 +12,7 @@ let db = null
 
 export async function initDB() {
   const SQL = await initSqlJs()
-  
+
   if (fs.existsSync(DB_PATH)) {
     const buffer = fs.readFileSync(DB_PATH)
     db = new SQL.Database(buffer)
@@ -22,6 +22,24 @@ export async function initDB() {
 
   db.run('PRAGMA journal_mode=WAL')
   db.run('PRAGMA foreign_keys=ON')
+
+  // Migration: ensure new columns on task_outputs for existing DBs
+  try {
+    const cols = db.exec("PRAGMA table_info(task_outputs)")
+    const existing = cols[0] ? cols[0].values.map(r => r[1]) : []
+    const addCol = (name, type) => {
+      if (!existing.includes(name)) {
+        try { db.run(`ALTER TABLE task_outputs ADD COLUMN ${name} ${type}`) } catch (e) {}
+      }
+    }
+    addCol('category_l1', 'INTEGER REFERENCES dict_categories(id)')
+    addCol('category_l2', 'INTEGER REFERENCES dict_categories(id)')
+    addCol('category_l3', 'INTEGER REFERENCES dict_categories(id)')
+    addCol('score_value', 'REAL DEFAULT 0')
+    addCol('score_quantity', 'REAL DEFAULT 0')
+    addCol('score_rule', "TEXT DEFAULT ''")
+    addCol('score_total', 'REAL DEFAULT 0')
+  } catch (e) { /* noop */ }
 
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -93,6 +111,13 @@ export async function initDB() {
       reviewer_id INTEGER,
       review_comment TEXT DEFAULT '',
       reviewed_at TEXT,
+      category_l1 INTEGER REFERENCES dict_categories(id),
+      category_l2 INTEGER REFERENCES dict_categories(id),
+      category_l3 INTEGER REFERENCES dict_categories(id),
+      score_value REAL DEFAULT 0,
+      score_quantity REAL DEFAULT 0,
+      score_rule TEXT DEFAULT '',
+      score_total REAL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )
   `)
@@ -163,6 +188,38 @@ export async function initDB() {
     )
   `)
 
+  // ============ Data Dictionary (一/二/三级分类) ============
+  db.run(`
+    CREATE TABLE IF NOT EXISTS dict_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level INTEGER NOT NULL,            -- 1 / 2 / 3
+      parent_id INTEGER REFERENCES dict_categories(id) ON DELETE CASCADE,
+      code TEXT DEFAULT '',
+      name TEXT NOT NULL,
+      score_rule TEXT DEFAULT 'fixed',  -- 'fixed' | 'range' | 'any'
+      score_value REAL DEFAULT 0,        -- fixed value or range lower bound
+      score_upper REAL DEFAULT 0,        -- range upper bound (unused for 'any' / 'fixed')
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `)
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dict_parent ON dict_categories(parent_id)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_dict_level ON dict_categories(level)`)
+
+  // Migration: daily_management tasks don't need decompose/assign flow,
+  // auto-set historical pending ones to in_progress so supervisors/leaders can submit outputs directly
+  try {
+    db.run(`UPDATE tasks SET status = 'in_progress', updated_at = datetime('now','localtime') WHERE task_type = 'daily_management' AND status = 'pending'`)
+  } catch (e) { /* noop */ }
+
+  // Migration: daily_management 任务“谁发起谁负责”，历史任务 supervisor 为空时默认设为发起人，
+  // 保证报表“主管”字段有值，且发起人（含主管/领导）可自行提交输出物并审核
+  try {
+    db.run(`UPDATE tasks SET supervisor_id = publisher_id, updated_at = datetime('now','localtime') WHERE task_type = 'daily_management' AND supervisor_id IS NULL`)
+  } catch (e) { /* noop */ }
+
   return db
 }
 
@@ -182,6 +239,8 @@ export function seedIfEmpty() {
   const count = db.exec('SELECT COUNT(*) as c FROM users')[0]?.values[0]?.[0] || 0
   if (count > 0) {
     importOrgData()
+    seedDictionaryIfEmpty()
+    saveDB()
     return
   }
 
@@ -295,5 +354,269 @@ const adminUser = db.exec("SELECT id FROM users WHERE username = 'admin'")
     }
   }
 
+  seedDictionaryIfEmpty()
   saveDB()
+}
+
+// ============================================================
+// Default data dictionary (一/二/三级分类 + score rules) - from 任务清单.xlsx
+// ============================================================
+function seedDictionaryIfEmpty() {
+  const existing = db.exec('SELECT COUNT(*) FROM dict_categories')
+  const count = existing[0]?.values[0]?.[0] || 0
+  if (count > 0) return
+
+  // 完整层级来自 任务清单.xlsx
+  const tree = [
+    {
+      name: '日常项目工作', l2: [
+        { name: '技术通知（临时作业、申购等。临时作业：拆倒件或只有一个作业记录单的等）', l3: [
+          { name: '内容编制', rule: 'fixed', score: 0.025 },
+          { name: 'SAP系统流程', rule: 'fixed', score: 0.025 }
+        ]},
+        { name: '技术通知（工艺文件、说明文件、方案等）', l3: [
+          { name: '内容编制', rule: 'fixed', score: 0.1 },
+          { name: 'SAP系统流程', rule: 'fixed', score: 0.1 }
+        ]},
+        { name: '说明文件（提供给业主、项目部等的临时性文件）', l3: [
+          { name: '说明文件', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '结构装配方案、整改方案（含记录单）', l3: [
+          { name: '结构装配方案、整改方案', rule: 'fixed', score: 5 }
+        ]},
+        { name: '试验/布线方案（含记录单）', l3: [
+          { name: '试验/布线方案', rule: 'fixed', score: 7 }
+        ]},
+        { name: '普查、跟踪方案（含记录单）', l3: [
+          { name: '普查、跟踪方案', rule: 'fixed', score: 3 }
+        ]},
+        { name: '专报（故障专报、运营专报）', l3: [
+          { name: '专报', rule: 'fixed', score: 1.5 }
+        ]},
+        { name: '替代材料', l3: [
+          { name: '替代材料', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '清单（配置清单、故障分析汇总清单、各类汇总表）', l3: [
+          { name: '清单', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: '请示（临修、申购、各类申请）', l3: [
+          { name: '请示', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: '技术变更申请表', l3: [
+          { name: '技术变更申请表', rule: 'fixed', score: 0.1 }
+        ]},
+        { name: '现场技术服务', l3: [
+          { name: '现场技术服务', rule: 'range', score: 0.2, high: 1 }
+        ]},
+        { name: '动车故障查看及回复', l3: [
+          { name: '动车故障查看及回复', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: '生产异常回复', l3: [
+          { name: '生产异常回复', rule: 'fixed', score: 0.5 }
+        ]}
+      ]
+    },
+    {
+      name: '项目策划工作（架大修、TPM、自主修等）', l2: [
+        { name: '工作计划', l3: [
+          { name: '整体计划', rule: 'fixed', score: 1 },
+          { name: '详细计划', rule: 'fixed', score: 3 }
+        ]},
+        { name: '工艺文件（包含：工艺、记录单、技规、BOM、方案、工艺流程图、工位配置表）', l3: [
+          { name: '工艺文件', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '培训', l3: [
+          { name: '内部培训资料', rule: 'range', score: 0.5, high: 1 },
+          { name: '内部培训签到单', rule: 'range', score: 0.5, high: 1 },
+          { name: '外部培训小结', rule: 'range', score: 2, high: 5 },
+          { name: '培训考试题', rule: 'range', score: 0.5, high: 1 }
+        ]},
+        { name: '工艺验证记录', l3: [
+          { name: '工艺验证记录', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '总体工艺文件', l3: [
+          { name: '总体工艺文件', rule: 'fixed', score: 4 }
+        ]},
+        { name: '维修策略说明', l3: [
+          { name: '维修策略说明', rule: 'fixed', score: 1 }
+        ]},
+        { name: '规程识别意见清单', l3: [
+          { name: '规程识别意见清单', rule: 'range', score: 0.5, high: 3 }
+        ]},
+        { name: '风险识别清单（PFMEA）', l3: [
+          { name: '风险识别清单', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '关键特殊过程输出物', l3: [
+          { name: '关键特殊过程清单', rule: 'fixed', score: 2 },
+          { name: '确认报告', rule: 'fixed', score: 0.2 },
+          { name: '验证报告', rule: 'fixed', score: 0.2 },
+          { name: '再确认报告', rule: 'fixed', score: 0.2 },
+          { name: '控制计划', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '评审记录单', l3: [
+          { name: '评审记录单', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: '投标文件', l3: [
+          { name: '投标文件', rule: 'range', score: 5, high: 15 }
+        ]}
+      ]
+    },
+    {
+      name: '专项工作', l2: [
+        { name: '工可报告', l3: [
+          { name: '实施方案', rule: 'range', score: 2, high: 5 },
+          { name: '资源清单', rule: 'fixed', score: 1 },
+          { name: '经济性分析', rule: 'range', score: 1, high: 3 },
+          { name: '其他', rule: 'any', score: 0 }
+        ]},
+        { name: '立项报告', l3: [
+          { name: '立项报告', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '现场阶段性报告', l3: [
+          { name: '调研报告', rule: 'range', score: 0.5, high: 2 },
+          { name: '阶段性结项报告', rule: 'range', score: 2, high: 5 },
+          { name: '验收报告及记录单（内部）', rule: 'range', score: 2, high: 5 }
+        ]},
+        { name: '预算清单', l3: [
+          { name: '预算清单（公司级）', rule: 'range', score: 0.2, high: 1 },
+          { name: '预算清单（部门级）', rule: 'range', score: 0.2, high: 0.5 },
+          { name: '预算清单（项目级）', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: '手册', l3: [
+          { name: '维护手册（内部）', rule: 'range', score: 0.2, high: 1 },
+          { name: '操作手册（内部）', rule: 'range', score: 0.5, high: 2 },
+          { name: '点检基准书、记录单（内部）', rule: 'range', score: 0.2, high: 1 }
+        ]},
+        { name: '图纸（内部出图）', l3: [
+          { name: '图纸（内部出图）', rule: 'range', score: 0.5, high: 5 }
+        ]}
+      ]
+    },
+    {
+      name: '管理类', l2: [
+        { name: '管理制度', l3: [
+          { name: '制度文件编制', rule: 'range', score: 1, high: 5 },
+          { name: '会签流程', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '通用工艺守则', l3: [
+          { name: '通用工艺守则', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '汇报材料', l3: [
+          { name: '项目周报', rule: 'fixed', score: 0.2 },
+          { name: '周专项汇报材料', rule: 'fixed', score: 0.5 },
+          { name: '外部汇报材料', rule: 'range', score: 0.5, high: 2 },
+          { name: '内部汇报材料', rule: 'range', score: 0.5, high: 2 },
+          { name: '其他临时性汇报材料', rule: 'any', score: 0 }
+        ]},
+        { name: '合同管理', l3: [
+          { name: '询价记录单', rule: 'fixed', score: 0.2 },
+          { name: '内部比选记录单', rule: 'fixed', score: 0.2 },
+          { name: '单一来源物料采购谈判会议记录', rule: 'fixed', score: 0.2 },
+          { name: '紧急采购物料采购谈判会议记录', rule: 'fixed', score: 0.2 },
+          { name: '采购项目立项审批表', rule: 'fixed', score: 0.5 },
+          { name: '采购合同会签表', rule: 'fixed', score: 0.5 },
+          { name: '采购合同', rule: 'range', score: 0.2, high: 0.5 },
+          { name: '采购订单', rule: 'fixed', score: 0.2 },
+          { name: 'SAP系统采购订单', rule: 'fixed', score: 0.2 },
+          { name: '紧急物料采购确认单（内部）', rule: 'fixed', score: 0.1 },
+          { name: '发票预制', rule: 'fixed', score: 0.05 }
+        ]},
+        { name: '信息化系统', l3: [
+          { name: 'MSBOM（SAP）', rule: 'fixed', score: 0.1 },
+          { name: 'MSBOM（PDM）', rule: 'fixed', score: 0.1 },
+          { name: '工程变更', rule: 'fixed', score: 0.05 },
+          { name: 'SBOP（PDM）', rule: 'fixed', score: 0.1 },
+          { name: '必修必换任务清单（SAP）', rule: 'fixed', score: 0.1 },
+          { name: '结构化工艺及质量策划（PDM）', rule: 'range', score: 1, high: 3 },
+          { name: '模型车（SAP）', rule: 'range', score: 0, high: 10 },
+          { name: '实体车、单车构型（SAP）', rule: 'fixed', score: 0.1 },
+          { name: '物料主数据-基础试图、工厂试图（SAP）', rule: 'fixed', score: 0.05 },
+          { name: '文档（SAP）', rule: 'range', score: 0.1, high: 0.2 },
+          { name: '车组数据（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '产线组工位（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '产线组产线（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '产线组台位（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '逻辑工位（SMART）', rule: 'fixed', score: 0.5 },
+          { name: 'SBOP数据同步（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '检修车辆资质（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '工艺网络（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '检修模式（SMART）', rule: 'fixed', score: 0.5 },
+          { name: 'SBOP顺序（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '列调配置（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '配置车型（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '产品构型/服务构型同步（SMART）', rule: 'fixed', score: 0.5 },
+          { name: '工作中心（SAP、SMART）', rule: 'fixed', score: 0.5 },
+          { name: '班组（SAP、SMART）', rule: 'fixed', score: 0.5 },
+          { name: '质量专检', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '体系管理输出物（内/外审材料、整改措施等）', l3: [
+          { name: '关键特殊过程证书', rule: 'range', score: 0.2, high: 1 },
+          { name: '乌龟图', rule: 'range', score: 0.2, high: 1 },
+          { name: '维修基线', rule: 'range', score: 0.2, high: 1 },
+          { name: '配置状态清单', rule: 'range', score: 0.2, high: 1 },
+          { name: '配置评审记录单', rule: 'fixed', score: 0.2 },
+          { name: '技术变更申请表', rule: 'range', score: 0.2, high: 1 },
+          { name: 'DFMEA、PFMEA', rule: 'range', score: 2, high: 5 },
+          { name: '技术变更验证确认表', rule: 'range', score: 0.2, high: 1 }
+        ]},
+        { name: '请示', l3: [
+          { name: '请示', rule: 'range', score: 0.2, high: 1 }
+        ]},
+        { name: '出差小结', l3: [
+          { name: '出差小结', rule: 'range', score: 0.5, high: 2 }
+        ]},
+        { name: '会议纪要', l3: [
+          { name: '验收报告及记录单（外部）', rule: 'fixed', score: 0.2 },
+          { name: '会议纪要（外部）和工作分解清单', rule: 'range', score: 0.5, high: 2 },
+          { name: '会议纪要（内部）和工作分解清单', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: '付款计划', l3: [
+          { name: '付款计划', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '支款凭证', l3: [
+          { name: '支款凭证', rule: 'fixed', score: 0.5 }
+        ]}
+      ]
+    },
+    {
+      name: '质量', l2: [
+        { name: '合格证', l3: [
+          { name: '合格证', rule: 'fixed', score: 0.05 }
+        ]},
+        { name: '暂缓执行项', l3: [
+          { name: '风险评估表', rule: 'fixed', score: 0.2 },
+          { name: '项目申报表', rule: 'fixed', score: 0.2 }
+        ]},
+        { name: 'PAC', l3: [
+          { name: 'PAC', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '双5归零报告', l3: [
+          { name: '双5归零报告', rule: 'fixed', score: 7 }
+        ]},
+        { name: '闭环开口项，输出闭环单', l3: [
+          { name: '闭环开口项，输出闭环单', rule: 'fixed', score: 0.5 }
+        ]},
+        { name: '首检报告', l3: [
+          { name: '首检报告', rule: 'fixed', score: 0.5 }
+        ]}
+      ]
+    }
+  ]
+
+  let order = 1
+  const insertCat = (level, parentId, name, rule, value, upper) => {
+    db.run(`INSERT INTO dict_categories (level, parent_id, name, score_rule, score_value, score_upper, sort_order, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+      [level, parentId, name, rule, value || 0, upper || 0, order++])
+    return db.exec('SELECT last_insert_rowid()')[0].values[0][0]
+  }
+
+  for (const l1 of tree) {
+    const l1Id = insertCat(1, null, l1.name, 'fixed', 0, 0)
+    for (const l2 of (l1.l2 || [])) {
+      const l2Id = insertCat(2, l1Id, l2.name, 'fixed', 0, 0)
+      for (const l3 of (l2.l3 || [])) {
+        insertCat(3, l2Id, l3.name, l3.rule || 'any', l3.score || 0, l3.high || 0)
+      }
+    }
+  }
 }

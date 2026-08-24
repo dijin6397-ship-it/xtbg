@@ -64,8 +64,36 @@ function getFullTask(db, taskId) {
   `)
   oStmt.bind([taskId])
   task.outputs = []
+  // Pre-fetch any category names + reference scores referenced by outputs
+  const catIds = []
   while (oStmt.step()) {
     const row = oStmt.getAsObject()
+    if (row.category_l1) catIds.push(row.category_l1)
+    if (row.category_l2) catIds.push(row.category_l2)
+    if (row.category_l3) catIds.push(row.category_l3)
+  }
+  oStmt.free()
+  const catMap = {}
+  if (catIds.length > 0) {
+    const uniq = Array.from(new Set(catIds))
+    const placeholders = uniq.map(() => '?').join(',')
+    const cStmt = db.prepare(`SELECT id, name, level, score_rule, score_value, score_upper FROM dict_categories WHERE id IN (${placeholders})`)
+    cStmt.bind(uniq)
+    while (cStmt.step()) {
+      const c = cStmt.getAsObject()
+      catMap[c.id] = { name: c.name, level: c.level, score_rule: c.score_rule, score_value: c.score_value, score_upper: c.score_upper }
+    }
+    cStmt.free()
+  }
+
+  const oStmt2 = db.prepare(`
+    SELECT o.*, u.name as reviewer_name
+    FROM task_outputs o LEFT JOIN users u ON o.reviewer_id = u.id
+    WHERE o.task_id = ? ORDER BY o.id DESC
+  `)
+  oStmt2.bind([taskId])
+  while (oStmt2.step()) {
+    const row = oStmt2.getAsObject()
     const submitter = getUserById(db, row.user_id)
     task.outputs.push({
       id: row.id,
@@ -75,10 +103,23 @@ function getFullTask(db, taskId) {
       reviewedAt: row.reviewed_at,
       submitter,
       reviewer: row.reviewer_name ? { id: row.reviewer_id, name: row.reviewer_name } : null,
-      createdAt: row.created_at
+      createdAt: row.created_at,
+      categoryL1: row.category_l1 || null,
+      categoryL2: row.category_l2 || null,
+      categoryL3: row.category_l3 || null,
+      categoryL1Name: row.category_l1 ? (catMap[row.category_l1]?.name || '') : '',
+      categoryL2Name: row.category_l2 ? (catMap[row.category_l2]?.name || '') : '',
+      categoryL3Name: row.category_l3 ? (catMap[row.category_l3]?.name || '') : '',
+      scoreValue: row.score_value || 0,
+      scoreQuantity: row.score_quantity || 0,
+      scoreTotal: row.score_total || 0,
+      scoreRule: row.score_rule || '',
+      // Reference scores from the L3 dictionary entry (for display in review modal)
+      refScoreValue: row.category_l3 ? (catMap[row.category_l3]?.score_value ?? 0) : 0,
+      refScoreUpper: row.category_l3 ? (catMap[row.category_l3]?.score_upper ?? 0) : 0
     })
   }
-  oStmt.free()
+  oStmt2.free()
 
   const fStmt = db.prepare('SELECT f.*, u.name FROM feedbacks f JOIN users u ON f.user_id = u.id WHERE f.task_id = ? ORDER BY f.id')
   fStmt.bind([taskId])
@@ -222,6 +263,10 @@ router.post('/', authMiddleware, (req, res) => {
       const s = db.prepare("SELECT id FROM users WHERE name = '蔡峥' AND active = 1")
       if (s.step()) supId = s.getAsObject().id
       s.free()
+    } else if (task_type === 'daily_management') {
+      // daily_management 任务为“谁发起谁负责”模式：未指定主管时默认主管=发起人，
+      // 便于报表展示主管字段，并支持发起人（含主管/领导）自行提交输出物并审核
+      supId = publisherId
     }
   }
 
@@ -231,6 +276,10 @@ router.post('/', authMiddleware, (req, res) => {
 
   let initialStatus = 'pending'
   if (task_type === 'key_work') {
+    initialStatus = 'in_progress'
+  } else if (task_type === 'daily_management') {
+    // daily_management 任务无需分解/分配流程，所有角色（员工/主管/领导/管理员）创建后直接进入进行中，
+    // 以便发起人（含主管/领导）可以立即提交输出物并自行评分审核
     initialStatus = 'in_progress'
   }
 
@@ -394,14 +443,52 @@ router.post('/:id/feedback', authMiddleware, (req, res) => {
   res.json({ task })
 })
 
-// POST /api/tasks/:id/submit-output - Staff submits output
+// POST /api/tasks/:id/submit-output - Staff submits output (with self-scoring)
 router.post('/:id/submit-output', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
-  const { content, subtask_id } = req.body
+  const { content, subtask_id, category_l1, category_l2, category_l3, score_value, score_quantity } = req.body
   const userId = req.user.id
   const db = getDB()
 
   if (!content) return res.status(400).json({ error: '请填写输出物' })
+  if (!category_l1) return res.status(400).json({ error: '请选择一级分类' })
+  if (!category_l2) return res.status(400).json({ error: '请选择二级分类' })
+  if (!category_l3) return res.status(400).json({ error: '请选择三级分类' })
+
+  // Resolve rule + reference score from the chosen L3 entry
+  const ruleStmt = db.prepare('SELECT score_rule, score_value, score_upper FROM dict_categories WHERE id = ?')
+  ruleStmt.bind([category_l3])
+  const rule = ruleStmt.step() ? ruleStmt.getAsObject() : null
+  ruleStmt.free()
+  if (!rule) return res.status(400).json({ error: '所选三级分类无效' })
+
+  // Validate self-score if provided
+  let sVal = Number(score_value || 0)
+  let sQty = Number(score_quantity || 0)
+  let sTotal = 0
+  let outputStatus = 'pending'
+
+  if (score_value !== undefined && score_value !== null && sVal > 0) {
+    // Submitter is self-scoring (self-review)
+    if (!sQty || sQty <= 0) {
+      return res.status(400).json({ error: '请填写数量（>0）' })
+    }
+    // Validate score against rule
+    if (rule.score_rule === 'fixed') {
+      if (sVal > Number(rule.score_value || 0)) {
+        return res.status(400).json({ error: `该分类为固定分值 ${rule.score_value}，分数不得超过此值` })
+      }
+    } else if (rule.score_rule === 'range') {
+      const lo = Number(rule.score_value || 0)
+      const hi = Number(rule.score_upper || 0)
+      if (sVal < lo || sVal > hi) {
+        return res.status(400).json({ error: `该分类分值范围为 ${lo}-${hi}，请填写区间内的分数` })
+      }
+    }
+    sTotal = Math.round(sVal * sQty * 100) / 100
+    // Self-reviewed: mark as approved by self
+    outputStatus = 'approved'
+  }
 
   // Use explicit subtask_id if provided, otherwise auto-associate
   let resolvedSubtaskId = subtask_id || null
@@ -413,42 +500,28 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
     resolvedSubtaskId = subtask?.id || null
   }
 
+  // Insert output with self-score data (if provided)
   db.run(`
-    INSERT INTO task_outputs (task_id, subtask_id, user_id, content) 
-    VALUES (?, ?, ?, ?)
-  `, [id, resolvedSubtaskId, userId, content])
+    INSERT INTO task_outputs (task_id, subtask_id, user_id, content, category_l1, category_l2, category_l3, score_rule, status, score_value, score_quantity, score_total, reviewer_id, reviewed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))
+  `, [id, resolvedSubtaskId, userId, content, category_l1, category_l2, category_l3, rule.score_rule || 'fixed', outputStatus, sVal, sQty, sTotal, outputStatus === 'approved' ? userId : null])
 
+  const submitLabel = outputStatus === 'approved'
+    ? `提交输出物（自行评分 ${sVal} × ${sQty} = ${sTotal}）: ${content}`
+    : `提交输出物: ${content}`
   db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "output", ?)',
-    [id, userId, `提交输出物: ${content}`])
+    [id, userId, submitLabel])
 
-  // Check task info including publisher role
+  // Check task info
   const taskRow = db.prepare('SELECT task_type, status, publisher_id FROM tasks WHERE id = ?')
   taskRow.bind([id])
   const tInfo = taskRow.step() ? taskRow.getAsObject() : null
   taskRow.free()
-  
+
   if (tInfo && tInfo.task_type === 'daily_management' && tInfo.status !== 'review') {
-    // Check if publisher is one of the 4 roles that should skip review
-    let shouldAutoComplete = false
-    if (tInfo.publisher_id) {
-      const pubStmt = db.prepare('SELECT role FROM users WHERE id = ?')
-      pubStmt.bind([tInfo.publisher_id])
-      const publisher = pubStmt.step() ? pubStmt.getAsObject() : null
-      pubStmt.free()
-      if (publisher && ['staff_tech', 'staff_quality', 'supervisor_tech', 'supervisor_quality'].includes(publisher.role)) {
-        shouldAutoComplete = true
-      }
-    }
-    
-    if (shouldAutoComplete) {
-      // Directly complete for daily_management initiated by the 4 roles
-      db.run('UPDATE tasks SET status = "completed", progress = 100, completed_at = datetime("now","localtime"), updated_at = datetime("now","localtime") WHERE id = ?', [id])
-      db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "approved", ?)',
-        [id, userId, '日常管理任务自动完成'])
-    } else {
-      // For leader/admin initiated daily_management, go to review
-      db.run('UPDATE tasks SET status = "review", updated_at = datetime("now","localtime") WHERE id = ?', [id])
-    }
+    // Daily management: do NOT auto-complete. Keep task in_progress.
+    // The submitter must manually click "complete" after self-reviewing all outputs.
+    // (Previously this auto-completed for staff/supervisor roles — removed per requirement.)
   } else if (tInfo && (tInfo.task_type === 'key_work' || tInfo.status === 'overdue') && tInfo.status !== 'review') {
     // For key_work and overdue tasks: move to review status
     db.run('UPDATE tasks SET status = "review", updated_at = datetime("now","localtime") WHERE id = ?', [id])
@@ -461,16 +534,56 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
 // POST /api/tasks/:id/review-output - Supervisor reviews output
 router.post('/:id/review-output', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
-  const { output_id, approved, comment } = req.body
+  const { output_id, approved, comment, score_value, score_quantity } = req.body
   const db = getDB()
 
   if (!output_id) return res.status(400).json({ error: '缺少输出物ID' })
 
+  // Resolve the output and its reference rule
+  const outStmt = db.prepare('SELECT category_l3 FROM task_outputs WHERE id = ? AND task_id = ?')
+  outStmt.bind([output_id, id])
+  const outRow = outStmt.step() ? outStmt.getAsObject() : null
+  outStmt.free()
+  if (!outRow) return res.status(404).json({ error: '输出物不存在' })
+  if (!outRow.category_l3) return res.status(400).json({ error: '该输出物未选择三级分类' })
+
+  const ruleStmt = db.prepare('SELECT score_rule, score_value, score_upper FROM dict_categories WHERE id = ?')
+  ruleStmt.bind([outRow.category_l3])
+  const rule = ruleStmt.step() ? ruleStmt.getAsObject() : { score_rule: 'fixed', score_value: 0, score_upper: 0 }
+  ruleStmt.free()
+
+  let sVal = Number(score_value || 0)
+  let sQty = Number(score_quantity || 0)
+  let sTotal = 0
+
+  if (approved) {
+    if (!sQty || sQty <= 0) {
+      return res.status(400).json({ error: '请填写数量（>0）' })
+    }
+    // Validate score against rule
+    if (rule.score_rule === 'fixed') {
+      if (sVal <= 0) sVal = Number(rule.score_value || 0)
+      if (sVal > Number(rule.score_value || 0)) {
+        return res.status(400).json({ error: `该分类为固定分值 ${rule.score_value}，分数不得超过此值` })
+      }
+    } else if (rule.score_rule === 'range') {
+      const lo = Number(rule.score_value || 0)
+      const hi = Number(rule.score_upper || 0)
+      if (sVal < lo || sVal > hi) {
+        return res.status(400).json({ error: `该分类分值范围为 ${lo}-${hi}，请填写区间内的分数` })
+      }
+    } else if (rule.score_rule === 'any') {
+      // No restriction
+    }
+    sTotal = Math.round(sVal * sQty * 100) / 100
+  }
+
   const status = approved ? 'approved' : 'rejected'
   db.run(`
-    UPDATE task_outputs SET status = ?, reviewer_id = ?, review_comment = ?, reviewed_at = datetime('now','localtime')
+    UPDATE task_outputs SET status = ?, reviewer_id = ?, review_comment = ?, reviewed_at = datetime('now','localtime'),
+    score_value = ?, score_quantity = ?, score_total = ?, score_rule = ?
     WHERE id = ? AND task_id = ?
-  `, [status, req.user.id, comment || '', output_id, id])
+  `, [status, req.user.id, comment || '', sVal, sQty, sTotal, rule.score_rule, output_id, id])
 
   const label = approved ? '审核通过' : '审核不通过'
   db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "review", ?)',

@@ -97,20 +97,22 @@
     </div>
 
     <!-- Success Modal -->
-    <div v-if="showSuccess" class="slide-panel">
-      <div class="slide-overlay" @click="showSuccess = false"></div>
-      <div class="slide-content" style="padding: 32px 24px; text-align: center">
-        <div class="m-success-icon">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#52c41a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-        </div>
-        <h2 style="font-size: 18px; font-weight: 600; margin-bottom: 8px">任务发布成功</h2>
-        <p style="color: var(--text-secondary); margin-bottom: 20px">任务已通知相关责任人</p>
-        <div style="display: flex; gap: 10px; justify-content: center">
-          <button class="btn btn-outline" @click="goTaskList" style="flex: 1; max-width: 140px">查看任务</button>
-          <button class="btn btn-primary" @click="resetForm" style="flex: 1; max-width: 140px">继续发布</button>
+    <Teleport to="body">
+      <div v-if="showSuccess" class="slide-panel">
+        <div class="slide-overlay" @click="showSuccess = false"></div>
+        <div class="slide-content" style="padding: 32px 24px; text-align: center">
+          <div class="m-success-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#52c41a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <h2 style="font-size: 18px; font-weight: 600; margin-bottom: 8px">任务发布成功</h2>
+          <p style="color: var(--text-secondary); margin-bottom: 20px">任务已通知相关责任人</p>
+          <div style="display: flex; gap: 10px; justify-content: center">
+            <button class="btn btn-outline" @click="goTaskList" style="flex: 1; max-width: 140px">查看任务</button>
+            <button class="btn btn-primary" @click="resetForm" style="flex: 1; max-width: 140px">继续发布</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 

@@ -21,7 +21,6 @@ export const isStaffQuality = computed(() => authStore.user?.role === 'staff_qua
 export const canApproveFinal = computed(() => authStore.user?.role === 'leader' || authStore.user?.role === 'admin')
 export const canReviewOutput = computed(() => ['supervisor_tech', 'supervisor_quality', 'admin'].includes(authStore.user?.role))
 export const canSubmitOutput = computed(() => ['staff_tech', 'staff_quality'].includes(authStore.user?.role))
-
 // Task creation permissions by role
 export const canCreateProjectTask = computed(() => ['leader', 'supervisor_tech', 'supervisor_quality', 'admin'].includes(authStore.user?.role))
 export const canCreateKeyWorkTask = computed(() => ['leader', 'admin'].includes(authStore.user?.role))

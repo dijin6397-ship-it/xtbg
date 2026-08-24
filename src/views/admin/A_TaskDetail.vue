@@ -65,8 +65,25 @@
               <span class="tag tag-sm" :class="'output-status-' + out.status">
                 {{ { pending: '待审核', approved: '已通过', rejected: '已退回' }[out.status] }}
               </span>
+              <button v-if="out.status === 'pending' && canRecallOutput(out)" class="btn btn-sm btn-danger" @click="handleRecallOutput(out.id)">
+                撤回
+              </button>
             </div>
             <div class="output-content">{{ out.content }}</div>
+            <div v-if="out.categoryL1Name || out.categoryL3Name" class="output-category">
+              <span class="cat-text">{{ out.categoryL1Name }} / {{ out.categoryL2Name }} / {{ out.categoryL3Name }}</span>
+            </div>
+            <div v-if="out.scoreRule" class="output-score-ref">
+              <span class="tag" :class="ruleClass(out.scoreRule)">{{ ruleLabel(out.scoreRule) }}</span>
+              <span v-if="out.scoreRule === 'fixed'" class="score-ref-text">参考分值 ≤ {{ out.refScoreValue }}</span>
+              <span v-if="out.scoreRule === 'range'" class="score-ref-text">参考分值 {{ out.refScoreValue }} - {{ out.refScoreUpper }}</span>
+              <span v-if="out.scoreRule === 'any'" class="score-ref-text">任意分值</span>
+            </div>
+            <div v-if="out.scoreTotal !== undefined && out.scoreTotal !== null && out.scoreTotal > 0" class="output-score">
+              <span class="score-label">分值：</span>
+              <span class="score-text">{{ out.scoreValue }} × {{ out.scoreQuantity }} = <strong>{{ out.scoreTotal }}</strong></span>
+              <span class="output-rule" v-if="out.scoreRule">({{ ruleLabel(out.scoreRule) }})</span>
+            </div>
             <div v-if="out.reviewComment" class="output-review">
               审核意见: {{ out.reviewComment }}
               <span v-if="out.reviewer"> — {{ out.reviewer.name }}</span>
@@ -125,8 +142,13 @@
             分配子任务
           </router-link>
 
+          <!-- Creator: start task (for pending tasks that don't need decompose) -->
+          <button v-if="task.status === 'pending' && canStartTask" class="btn btn-primary btn-block" @click="handleStartTask">
+            开始任务
+          </button>
+
           <!-- Staff: submit output -->
-          <router-link v-if="canSubmitOutput && (task.status === 'in_progress' || task.status === 'feedback')" :to="`/admin/task/${task.id}/feedback`" class="btn btn-primary btn-block">
+          <router-link v-if="canSubmitOutputBtn && (task.status === 'in_progress' || task.status === 'feedback')" :to="`/admin/task/${task.id}/feedback`" class="btn btn-primary btn-block">
             提交输出物
           </router-link>
 
@@ -135,8 +157,7 @@
             <div v-for="out in pendingOutputs" :key="out.id" class="review-item">
               <div class="review-label">审核: {{ out.content?.substring(0, 30) }}...</div>
               <div class="review-btns">
-                <button class="btn btn-sm btn-success" @click="handleReview(out.id, true)">通过</button>
-                <button class="btn btn-sm btn-danger" @click="handleReview(out.id, false)">退回</button>
+                <button class="btn btn-sm btn-success" @click="openReviewModal(out)">审核</button>
               </div>
             </div>
           </div>
@@ -153,8 +174,8 @@
             </div>
           </div>
 
-          <!-- Daily management: direct complete -->
-          <div v-if="task.task_type === 'daily_management' && task.status === 'in_progress'" class="daily-complete-actions">
+          <!-- Daily management: direct complete (requires output + scoring/review first) -->
+          <div v-if="task.task_type === 'daily_management' && task.status === 'in_progress' && task.outputs?.length > 0 && !(task.outputs?.filter(o => o.status === 'pending').length > 0)" class="daily-complete-actions">
             <button class="btn btn-primary btn-block" @click="handleDailyComplete">
               完成任务
             </button>
@@ -236,6 +257,54 @@
     <p>{{ loading ? '加载中...' : '任务不存在' }}</p>
   </div>
 
+  <!-- Output Review Modal -->
+  <div v-if="showReviewModal" class="modal-overlay" @click.self="showReviewModal = false">
+    <div class="modal-content">
+      <h3>{{ reviewOutput ? (reviewOutput.categoryL1Name ? `审核: ${reviewOutput.categoryL1Name} / ${reviewOutput.categoryL2Name} / ${reviewOutput.categoryL3Name}` : '审核输出物') : '审核输出物' }}</h3>
+      <div v-if="reviewOutput" class="review-output-content" style="margin-bottom:16px; padding:12px; background:#fafbfc; border-radius:8px;">
+        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:4px;">{{ reviewOutput.content }}</div>
+        <div style="font-size:12px; color:var(--text-caption);">
+          <span v-if="reviewOutput.categoryL1Name">分类: {{ reviewOutput.categoryL1Name }} / {{ reviewOutput.categoryL2Name }} / {{ reviewOutput.categoryL3Name }}</span>
+          <span v-else>未分类</span>
+        </div>
+      </div>
+      <div class="form-group" v-if="reviewOutput">
+        <label class="form-label">分值规则</label>
+        <div class="rule-display">
+          <span class="tag" :class="ruleClass(reviewOutput.scoreRule)">{{ ruleLabel(reviewOutput.scoreRule) }}</span>
+          <span v-if="reviewOutput.scoreRule === 'fixed'">参考分值 ≤ {{ reviewOutput.refScoreValue }}</span>
+          <span v-if="reviewOutput.scoreRule === 'range'">参考分值 {{ reviewOutput.refScoreValue }} - {{ reviewOutput.refScoreUpper }}</span>
+          <span v-if="reviewOutput.scoreRule === 'any'">任意分值</span>
+        </div>
+      </div>
+      <div v-if="reviewOutput && reviewOutput.status === 'pending' && !rejecting" class="form-group">
+        <label class="form-label">分数 <span class="req">*</span></label>
+        <input v-model.number="reviewScore" type="number" step="0.5" min="0" class="form-textarea" style="min-height:auto" placeholder="请输入分数" />
+        <div v-if="reviewOutput.scoreRule === 'fixed'" class="hint-line">该分类固定分值为 {{ reviewOutput.refScoreValue }}，分数不得超过此值</div>
+        <div v-if="reviewOutput.scoreRule === 'range'" class="hint-line">该分类分值区间为 {{ reviewOutput.refScoreValue }} - {{ reviewOutput.refScoreUpper }}</div>
+      </div>
+      <div v-if="reviewOutput && reviewOutput.status === 'pending' && !rejecting" class="form-group">
+        <label class="form-label">数量 <span class="req">*</span></label>
+        <input v-model.number="reviewQty" type="number" step="0.5" min="0.5" class="form-textarea" style="min-height:auto" placeholder="请输入数量" />
+        <div class="hint-line">总分 = 分数 × 数量</div>
+      </div>
+      <div class="form-group" v-if="rejecting">
+        <label class="form-label">退回原因 <span class="req">*</span></label>
+        <textarea v-model="reviewComment" class="form-textarea" rows="3" placeholder="请输入退回原因"></textarea>
+      </div>
+      <div v-if="reviewOutput && reviewOutput.status === 'pending' && !rejecting" class="score-preview">
+        预估总分：<strong>{{ (reviewScore * reviewQty).toFixed(2) }}</strong>
+      </div>
+      <div class="modal-actions">
+        <button v-if="rejecting" class="btn btn-primary" @click="confirmReject" :disabled="!reviewComment.trim()">确认退回</button>
+        <button v-else class="btn btn-success" @click="confirmApprove" :disabled="reviewScore <= 0 || reviewQty <= 0">确认通过</button>
+        <button v-if="rejecting" class="btn" @click="rejecting = false">取消退回</button>
+        <button v-else class="btn btn-danger" @click="rejecting = true">退回</button>
+        <button class="btn" @click="closeReviewModal">取消</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Subtask Urge Modal -->
   <div v-if="showUrgeModal" class="modal-overlay" @click.self="showUrgeModal = false">
     <div class="modal-content">
@@ -272,6 +341,13 @@ const urgeSubtaskId = ref(null)
 const urgeNewDeadline = ref('')
 const showUrgeModal = ref(false)
 
+// Review modal state
+const showReviewModal = ref(false)
+const reviewOutput = ref(null)
+const reviewScore = ref(0)
+const reviewQty = ref(0)
+const rejecting = ref(false)
+
 const priorityMap = {
   urgent: { label: '紧急', color: '#ff4d4f', bg: '#fff2f0' },
   high: { label: '重要', color: '#fa8c16', bg: '#fff7e6' },
@@ -303,6 +379,17 @@ const canReview = computed(() => {
 
 const canApprove = computed(() => canApproveFinal.value)
 
+const canSubmitOutputBtn = computed(() => {
+  if (!task.value) return false
+  const role = authStore.user?.role
+  // Staff can always submit outputs
+  if (['staff_tech', 'staff_quality'].includes(role)) return true
+  // Supervisors / leaders / admin can submit outputs for daily_management tasks (self-review after scoring)
+  if (['supervisor_tech', 'supervisor_quality', 'leader'].includes(role) && task.value.task_type === 'daily_management') return true
+  if (role === 'admin' && task.value.task_type === 'daily_management') return true
+  return false
+})
+
 const canSupervise = computed(() => {
   const role = authStore.user?.role
   return role === 'leader' || role === 'admin'
@@ -318,6 +405,17 @@ const canRecall = computed(() => {
   return task.value.publisher_id === uid || 
     task.value.supervisor_id === uid ||
     ['admin', 'leader'].includes(authStore.user?.role)
+})
+
+const canStartTask = computed(() => {
+  if (!task.value) return false
+  if (task.value.status !== 'pending') return false
+  const uid = authStore.user?.id
+  // Task creator can start the task if they're not a leader/supervisor who would use decompose/assign
+  const role = authStore.user?.role
+  const isPublisher = task.value.publisher_id === uid
+  const isLeaderOrSupervisor = ['leader', 'supervisor_tech', 'supervisor_quality', 'admin'].includes(role)
+  return isPublisher && !isLeaderOrSupervisor
 })
 
 // Recall functions
@@ -400,8 +498,22 @@ const pendingOutputs = computed(() => {
 
 const hasPendingOutput = computed(() => pendingOutputs.value.length > 0)
 
+const canRecallOutput = (output) => {
+  if (!output || !task.value) return false
+  const uid = authStore.user?.id
+  // Only the submitter can recall their own pending output
+  return output.submitter?.id === uid && output.status === 'pending'
+}
+
 function feedbackTypeLabel(type) {
   return { progress: '进度更新', issue: '问题反馈', complete: '完成报告', output: '输出物', review: '审核', approved: '通过', rejected: '退回', comment: '评论' }[type] || type
+}
+
+function ruleLabel(rule) {
+  return { fixed: '单值', range: '区间', any: '任意' }[rule] || ''
+}
+function ruleClass(rule) {
+  return `rule-${rule || 'fixed'}`
 }
 
 async function loadTask() {
@@ -416,11 +528,61 @@ async function loadTask() {
   }
 }
 
-async function handleReview(outputId, approved) {
-  const comment = approved ? '' : prompt('请输入退回原因:') || ''
+function openReviewModal(output) {
+  reviewOutput.value = output
+  rejecting.value = false
+  reviewComment.value = ''
+  // Pre-fill score from the reference score hint (not the actual scoreValue which may be 0)
+  if (output.scoreRule === 'fixed' && output.refScoreValue) {
+    reviewScore.value = output.refScoreValue
+  } else if (output.scoreRule === 'range' && output.refScoreValue) {
+    reviewScore.value = output.refScoreValue
+  } else {
+    reviewScore.value = output.scoreValue || 0
+  }
+  reviewQty.value = output.scoreQuantity || 1
+  showReviewModal.value = true
+}
+
+function closeReviewModal() {
+  showReviewModal.value = false
+  reviewOutput.value = null
+  reviewScore.value = 0
+  reviewQty.value = 0
+  rejecting.value = false
+}
+
+async function confirmApprove() {
+  if (!reviewOutput.value) return
+  if (reviewScore.value <= 0 || reviewQty.value <= 0) return
   try {
-    const data = await taskAPI.reviewOutput(task.value.id, { output_id: outputId, approved, comment })
+    const data = await taskAPI.reviewOutput(task.value.id, {
+      output_id: reviewOutput.value.id,
+      approved: true,
+      comment: '',
+      score_value: reviewScore.value,
+      score_quantity: reviewQty.value
+    })
     task.value = data.task
+    closeReviewModal()
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+async function confirmReject() {
+  if (!reviewOutput.value) return
+  if (!reviewComment.value.trim()) return
+  try {
+    const data = await taskAPI.reviewOutput(task.value.id, {
+      output_id: reviewOutput.value.id,
+      approved: false,
+      comment: reviewComment.value,
+      score_value: 0,
+      score_quantity: 0
+    })
+    task.value = data.task
+    closeReviewModal()
   } catch (e) {
     alert(e.message)
   }
@@ -493,10 +655,38 @@ async function submitSubtaskUrge() {
 }
 
 async function handleDailyComplete() {
-  if (!confirm('确认标记此任务为完成？')) return
+  // Daily management tasks must have submitted output and must be reviewed/scored.
+  // Cannot complete directly without output submission and scoring/review.
+  if (!task.value?.outputs?.length) {
+    alert('部门日常管理任务必须先提交输出物并完成评分审核后才能完成，不能直接标记完成。')
+    return
+  }
+  const pending = task.value.outputs?.filter(o => o.status === 'pending') || []
+  if (pending.length > 0) {
+    alert('仍有未审核的输出物，请先完成审核评分后再标记完成。')
+    return
+  }
+  // Also require at least one output to have a score set (scored/reviewed)
+  const hasScored = task.value.outputs?.some(o => o.scoreValue !== undefined && o.scoreValue !== null)
+  if (!hasScored) {
+    alert('部门日常管理任务需要输出物评分后才能完成。请先提交输出物并完成评分审核。')
+    return
+  }
+  if (!confirm('已提交输出物并完成评分，确认标记此任务为完成？')) return
   try {
-    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务完成' })
+    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务完成（已评分审核）' })
     task.value = data.task
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+async function handleStartTask() {
+  if (!confirm('确定要开始此任务吗？')) return
+  try {
+    const data = await taskAPI.update(task.value.id, { status: 'in_progress' })
+    task.value = data.task
+    alert('任务已开始')
   } catch (e) {
     alert(e.message)
   }
@@ -569,6 +759,23 @@ onMounted(loadTask)
 .fb-type-comment { color: var(--text-secondary); background: #f5f5f5; }
 .empty-hint { font-size: 13px; color: var(--text-caption); padding: 12px 0; }
 
+.output-category {
+  font-size: 12px; color: var(--primary); background: var(--primary-light);
+  padding: 2px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px;
+}
+.output-score {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0;
+  font-size: 12px; color: var(--text-secondary);
+}
+.output-score-ref {
+  display: flex; align-items: center; gap: 6px; margin-top: 6px;
+  font-size: 12px; color: var(--text-secondary);
+}
+.score-ref-text { color: var(--text); font-weight: 500; }
+.score-label { font-weight: 500; }
+.score-text { color: var(--primary); font-weight: 600; }
+.output-rule { color: var(--text-caption); }
+
 .card { background: #fff; border-radius: var(--radius); padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
 .card h3 { font-size: 15px; font-weight: 600; color: var(--text); margin: 0 0 14px 0; }
 .info-list { display: flex; flex-direction: column; gap: 10px; }
@@ -630,7 +837,14 @@ onMounted(loadTask)
 .edit-form .form-group { margin-bottom: 0; }
 .subtask-deadline { font-size: 11px; color: var(--text-caption); white-space: nowrap; }
 .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-content { background: #fff; border-radius: 12px; padding: 24px; width: 420px; max-width: 90vw; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+.modal-content { background: #fff; border-radius: 12px; padding: 24px; width: 480px; max-width: 90vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 .modal-content h3 { font-size: 16px; font-weight: 600; margin: 0 0 16px 0; color: var(--text); }
-.modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap; }
+.rule-display { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.tag.rule-fixed { color: #fa8c16; background: #fff7e6; }
+.tag.rule-range { color: #1677ff; background: #e6f4ff; }
+.tag.rule-any { color: #8c8c8c; background: #f5f5f5; }
+.req { color: #ff4d4f; }
+.hint-line { font-size: 11px; color: var(--text-caption); margin-top: 4px; }
+.score-preview { padding: 10px 12px; background: #f6ffed; border-radius: 6px; color: #52c41a; font-size: 14px; margin: 8px 0; }
 </style>

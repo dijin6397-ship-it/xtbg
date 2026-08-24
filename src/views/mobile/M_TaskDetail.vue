@@ -126,6 +126,38 @@
       </div>
     </div>
 
+    <!-- Outputs -->
+    <div class="card" v-if="task.outputs?.length">
+      <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px">输出物 ({{ task.outputs.length }})</div>
+      <div v-for="out in task.outputs" :key="out.id" class="m-output-item" :class="'output-' + out.status">
+        <div class="m-output-header">
+          <span class="output-user">{{ out.submitter?.name }}</span>
+          <span class="output-time">{{ out.createdAt }}</span>
+          <span class="tag tag-sm" :class="'output-status-' + out.status">
+            {{ { pending: '待审核', approved: '已通过', rejected: '已退回' }[out.status] }}
+          </span>
+          <button v-if="out.status === 'pending' && canRecallOutput(out)" class="btn btn-sm btn-danger" @click="handleRecallOutput(out.id)">
+            撤回
+          </button>
+        </div>
+        <div class="output-content">{{ out.content }}</div>
+        <div v-if="out.categoryL1Name" class="output-category-text">{{ out.categoryL1Name }} / {{ out.categoryL2Name }} / {{ out.categoryL3Name }}</div>
+        <div v-if="out.scoreRule" class="output-score-ref">
+          <span class="tag tag-sm" :class="'rule-' + out.scoreRule">{{ ruleLabel(out.scoreRule) }}</span>
+          <span v-if="out.scoreRule === 'fixed'">≤ {{ out.refScoreValue }}</span>
+          <span v-if="out.scoreRule === 'range'">{{ out.refScoreValue }} - {{ out.refScoreUpper }}</span>
+          <span v-if="out.scoreRule === 'any'">任意</span>
+        </div>
+        <div v-if="out.scoreTotal > 0" class="output-score-display">
+          分值：{{ out.scoreValue }} × {{ out.scoreQuantity }} = {{ out.scoreTotal }}
+        </div>
+        <div v-if="out.reviewComment" class="output-review">
+          审核意见: {{ out.reviewComment }}
+          <span v-if="out.reviewer"> — {{ out.reviewer.name }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Feedbacks -->
     <div class="card">
       <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px">动态 ({{ task.feedbacks.length }})</div>
@@ -152,6 +184,7 @@
         <button class="btn btn-primary" style="flex: 1" @click="goFeedback">提交反馈</button>
       </template>
       <button v-if="task.status === 'in_progress' && task.task_type === 'daily_management'" class="btn btn-primary" @click="goFeedback">反馈输出物</button>
+      <button v-if="canDailyComplete" class="btn btn-success" @click="handleDailyComplete">完成任务</button>
       <button v-if="task.status === 'feedback'" class="btn btn-primary" @click="handleApplyComplete">申请完成</button>
       <button v-if="task.status === 'review'" class="btn btn-outline" style="flex: 1" @click="handleRecallComplete">撤回申请</button>
       <template v-if="task.status === 'review'">
@@ -166,25 +199,27 @@
     </div>
 
     <!-- Urge Panel -->
-    <div v-if="showUrgePanel" class="slide-panel">
-      <div class="slide-overlay" @click="showUrgePanel = false"></div>
-      <div class="slide-content" style="padding: 24px">
-        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px">催办通知</h3>
-        <div class="form-group">
-          <label class="form-label">催办类型</label>
-          <div style="display: flex; gap: 8px">
-            <span class="filter-tab" :class="{ active: urgeType === 'urge' }" @click="urgeType = 'urge'">催办</span>
-            <span class="filter-tab" :class="{ active: urgeType === 'warn' }" @click="urgeType = 'warn'">警告</span>
-            <span class="filter-tab" :class="{ active: urgeType === 'escalate' }" @click="urgeType = 'escalate'">升级</span>
+    <Teleport to="body">
+      <div v-if="showUrgePanel" class="slide-panel">
+        <div class="slide-overlay" @click="showUrgePanel = false"></div>
+        <div class="slide-content" style="padding: 24px">
+          <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px">催办通知</h3>
+          <div class="form-group">
+            <label class="form-label">催办类型</label>
+            <div style="display: flex; gap: 8px">
+              <span class="filter-tab" :class="{ active: urgeType === 'urge' }" @click="urgeType = 'urge'">催办</span>
+              <span class="filter-tab" :class="{ active: urgeType === 'warn' }" @click="urgeType = 'warn'">警告</span>
+              <span class="filter-tab" :class="{ active: urgeType === 'escalate' }" @click="urgeType = 'escalate'">升级</span>
+            </div>
           </div>
+          <div class="form-group">
+            <label class="form-label">催办内容</label>
+            <textarea class="form-textarea" v-model="urgeMsg" placeholder="请输入催办内容"></textarea>
+          </div>
+          <button class="btn btn-primary" @click="handleUrge">发送</button>
         </div>
-        <div class="form-group">
-          <label class="form-label">催办内容</label>
-          <textarea class="form-textarea" v-model="urgeMsg" placeholder="请输入催办内容"></textarea>
-        </div>
-        <button class="btn btn-primary" @click="handleUrge">发送</button>
       </div>
-    </div>
+    </Teleport>
 
   </div>
 
@@ -224,6 +259,10 @@ const progressColor = computed(() => {
 
 function getStatusKey(item) { return statusMap[item.status] || {} }
 
+function ruleLabel(rule) {
+  return { fixed: '单值', range: '区间', any: '任意' }[rule] || ''
+}
+
 const canRecall = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'pending' && task.value.status !== 'decomposing') return false
@@ -232,6 +271,23 @@ const canRecall = computed(() => {
     task.value.supervisor_id === uid ||
     ['admin', 'leader'].includes(authStore.user?.role)
 })
+
+const canDailyComplete = computed(() => {
+  if (!task.value) return false
+  if (task.value.task_type !== 'daily_management') return false
+  if (task.value.status !== 'in_progress') return false
+  if (!task.value.outputs?.length) return false
+  const hasPending = task.value.outputs.some(o => o.status === 'pending')
+  if (hasPending) return false
+  const hasScored = task.value.outputs.some(o => o.scoreValue > 0)
+  return hasScored
+})
+
+const canRecallOutput = (output) => {
+  if (!output || !task.value) return false
+  const uid = authStore.user?.id
+  return output.submitter?.id === uid && output.status === 'pending'
+}
 
 function subProgressColor(p) {
   if (p >= 80) return '#52c41a'
@@ -296,6 +352,30 @@ async function handleRecallTask() {
   try {
     const data = await taskAPI.recall(task.value.id)
     // Update the task in store
+    const idx = store.tasks.findIndex(t => t.id === task.value.id)
+    if (idx >= 0) store.tasks[idx] = data.task
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+async function handleRecallOutput(outputId) {
+  if (!confirm('确定要撤回此输出物吗？')) return
+  try {
+    const data = await taskAPI.recallOutput(task.value.id, outputId)
+    // Update the task in store
+    const idx = store.tasks.findIndex(t => t.id === task.value.id)
+    if (idx >= 0) store.tasks[idx] = data.task
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+async function handleDailyComplete() {
+  if (!task.value) return
+  if (!confirm('已提交输出物并完成评分，确认标记此任务为完成？')) return
+  try {
+    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务完成（已评分审核）' })
     const idx = store.tasks.findIndex(t => t.id === task.value.id)
     if (idx >= 0) store.tasks[idx] = data.task
   } catch (e) {
@@ -388,5 +468,32 @@ async function handleRecallTask() {
   font-size: 14px;
   font-weight: 500;
 }
+
+.m-output-item {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  margin-bottom: 10px;
+  background: #fff;
+}
+.m-output-item.output-approved { border-color: #b7eb8f; background: #f6ffed; }
+.m-output-item.output-rejected { border-color: #ffa39e; background: #fff2f0; }
+
+.m-output-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.output-user { font-size: 13px; font-weight: 500; color: var(--text); }
+.output-time { font-size: 12px; color: var(--text-caption); margin-left: auto; }
+.output-content { font-size: 14px; color: var(--text); line-height: 1.5; }
+.output-review { font-size: 12px; color: var(--text-secondary); margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0; }
+.output-status-pending { color: #fa8c16; background: #fff7e6; }
+.output-status-approved { color: #52c41a; background: #f6ffed; }
+.output-status-rejected { color: #ff4d4f; background: #fff2f0; }
+.output-category-text { font-size: 12px; color: var(--primary); margin-bottom: 4px; }
+.output-score-ref { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.output-score-display { font-size: 12px; color: var(--primary); font-weight: 600; margin-top: 4px; }
+.rule-fixed { color: #fa8c16; background: #fff7e6; }
+.rule-range { color: #1677ff; background: #e6f4ff; }
+.rule-any { color: #8c8c8c; background: #f5f5f5; }
+
 .btn-warning { background: #faad14; color: #fff; border-color: #faad14; }
+.btn-success { background: #52c41a; color: #fff; border-color: #52c41a; }
 </style>

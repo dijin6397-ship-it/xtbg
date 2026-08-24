@@ -111,17 +111,19 @@
     </div>
 
     <!-- Urge Panel -->
-    <div v-if="showUrgePanel" class="slide-panel">
-      <div class="slide-overlay" @click="showUrgePanel = false"></div>
-      <div class="slide-content" style="padding:24px">
-        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px">\u53D1\u9001\u50AC\u529E\u901A\u77E5</h3>
-        <div class="form-group">
-          <label class="form-label">\u50AC\u529E\u5185\u5BB9</label>
-          <textarea class="form-textarea" v-model="urgeMsg" placeholder="\u8BF7\u8F93\u5165\u50AC\u529E\u5185\u5BB9"></textarea>
+    <Teleport to="body">
+      <div v-if="showUrgePanel" class="slide-panel">
+        <div class="slide-overlay" @click="showUrgePanel = false"></div>
+        <div class="slide-content" style="padding:24px">
+          <h3 style="font-size:16px;font-weight:600;margin-bottom:16px">\u53D1\u9001\u50AC\u529E\u901A\u77E5</h3>
+          <div class="form-group">
+            <label class="form-label">\u50AC\u529E\u5185\u5BB9</label>
+            <textarea class="form-textarea" v-model="urgeMsg" placeholder="\u8BF7\u8F93\u5165\u50AC\u529E\u5185\u5BB9"></textarea>
+          </div>
+          <button class="btn btn-primary" @click="sendUrge">\u53D1\u9001</button>
         </div>
-        <button class="btn btn-primary" @click="sendUrge">\u53D1\u9001</button>
       </div>
-    </div>
+    </Teleport>
 
   </div>
 

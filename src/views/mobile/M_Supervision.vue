@@ -87,28 +87,30 @@
     </div>
 
     <!-- Urge Panel -->
-    <div v-if="showUrge" class="slide-panel">
-      <div class="slide-overlay" @click="showUrge = false"></div>
-      <div class="slide-content" style="padding: 24px">
-        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px">发送催办通知</h3>
-        <div v-if="urgeTarget" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px">
-          目标任务: <strong>{{ urgeTarget.title }}</strong>
-        </div>
-        <div class="form-group">
-          <label class="form-label">催办类型</label>
-          <div style="display: flex; gap: 8px">
-            <span class="filter-tab" :class="{ active: urgeType === 'urge' }" @click="urgeType = 'urge'">催办</span>
-            <span class="filter-tab" :class="{ active: urgeType === 'warn' }" @click="urgeType = 'warn'">警告</span>
-            <span class="filter-tab" :class="{ active: urgeType === 'escalate' }" @click="urgeType = 'escalate'">升级</span>
+    <Teleport to="body">
+      <div v-if="showUrge" class="slide-panel">
+        <div class="slide-overlay" @click="showUrge = false"></div>
+        <div class="slide-content" style="padding: 24px">
+          <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px">发送催办通知</h3>
+          <div v-if="urgeTarget" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px">
+            目标任务: <strong>{{ urgeTarget.title }}</strong>
           </div>
+          <div class="form-group">
+            <label class="form-label">催办类型</label>
+            <div style="display: flex; gap: 8px">
+              <span class="filter-tab" :class="{ active: urgeType === 'urge' }" @click="urgeType = 'urge'">催办</span>
+              <span class="filter-tab" :class="{ active: urgeType === 'warn' }" @click="urgeType = 'warn'">警告</span>
+              <span class="filter-tab" :class="{ active: urgeType === 'escalate' }" @click="urgeType = 'escalate'">升级</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">催办内容</label>
+            <textarea class="form-textarea" v-model="urgeMsg" placeholder="请输入催办内容"></textarea>
+          </div>
+          <button class="btn btn-primary" @click="handleUrge">发送通知</button>
         </div>
-        <div class="form-group">
-          <label class="form-label">催办内容</label>
-          <textarea class="form-textarea" v-model="urgeMsg" placeholder="请输入催办内容"></textarea>
-        </div>
-        <button class="btn btn-primary" @click="handleUrge">发送通知</button>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 

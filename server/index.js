@@ -10,6 +10,7 @@ import supervisionRoutes from './routes/supervision.js'
 import notificationRoutes from './routes/notifications.js'
 import departmentRoutes from './routes/departments.js'
 import moduleRoutes from './routes/modules.js'
+import dictionaryRoutes from './routes/dictionary.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -27,8 +28,11 @@ app.use('/api/supervision', supervisionRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/departments', departmentRoutes)
 app.use('/api/modules', moduleRoutes)
+app.use('/api/dictionary', dictionaryRoutes)
 
 app.get('/api/health', (req, res) => {
+  // 本地 SQLite 模式下每次健康检查自动落盘，防止进程被强杀导致数据丢失
+  try { saveDB() } catch (e) {}
   res.json({ status: 'ok', time: new Date().toISOString() })
 })
 

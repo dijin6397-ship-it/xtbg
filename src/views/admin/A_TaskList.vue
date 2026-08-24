@@ -199,9 +199,9 @@ onMounted(loadTasks)
 
 <style scoped>
 .task-list-page { display: flex; flex-direction: column; gap: 20px; }
-.page-header { display: flex; align-items: baseline; gap: 12px; }
-.page-header h2 { font-size: 20px; font-weight: 600; color: var(--text); margin: 0; }
-.summary { font-size: 13px; color: var(--text-secondary); }
+.page-header { display: flex; align-items: baseline; gap: 12px; background: #fff; color: #000; padding: 16px 16px 20px; border-radius: var(--radius); margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.page-header h2 { font-size: 20px; font-weight: 600; color: #000; margin: 0; }
+.summary { font-size: 13px; color: #000; }
 
 .toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .search-box {

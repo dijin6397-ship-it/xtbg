@@ -39,6 +39,7 @@ const routes = [
       { path: 'task/:id/feedback', name: 'M_TaskFeedback', component: () => import('../views/mobile/M_TaskFeedback.vue'), meta: { title: '提交反馈' } },
       { path: 'task/:id/complete', name: 'M_TaskComplete', component: () => import('../views/mobile/M_TaskComplete.vue'), meta: { title: '申请完成' } },
       { path: 'supervision', name: 'M_Supervision', component: () => import('../views/mobile/M_Supervision.vue'), meta: { title: '督办中心' } },
+      { path: 'report', name: 'M_Report', component: () => import('../views/mobile/M_Report.vue'), meta: { title: '输出物报表' } },
       { path: 'account', name: 'M_AccountManage', component: () => import('../views/mobile/M_AccountManage.vue'), meta: { title: '账号管理', roles: ['admin'] } }
     ]
   },
@@ -57,6 +58,8 @@ const routes = [
       { path: 'task/:id/complete', name: 'AdminTaskComplete', component: () => import('../views/admin/A_TaskComplete.vue'), meta: { title: '申请完成' } },
       { path: 'supervision', name: 'AdminSupervision', component: () => import('../views/admin/A_Supervision.vue'), meta: { title: '督办中心' } },
       { path: 'showcase', name: 'AdminShowcase', component: () => import('../views/admin/A_Showcase.vue'), meta: { title: '任务展示' } },
+      { path: 'report', name: 'AdminReport', component: () => import('../views/admin/A_Report.vue'), meta: { title: '报表统计' } },
+      { path: 'dictionary', name: 'AdminDictionary', component: () => import('../views/admin/A_Dictionary.vue'), meta: { title: '分类字典管理', roles: ['admin'] } },
       { path: 'users', name: 'AdminUsers', component: () => import('../views/admin/A_UserManagement.vue'), meta: { title: '账号管理', roles: ['admin'] } }
     ]
   }

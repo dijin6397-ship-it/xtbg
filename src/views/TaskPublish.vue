@@ -69,15 +69,17 @@
     </div>
 
     <!-- Success Modal -->
-    <div v-if="showSuccess" class="slide-panel">
-      <div class="slide-overlay" @click="showSuccess = false"></div>
-      <div class="slide-content" style="padding:32px 24px;text-align:center">
-        <div style="font-size:48px;margin-bottom:12px">✅</div>
-        <h2 style="font-size:18px;font-weight:600;margin-bottom:8px">任务发布成功</h2>
-        <p style="color:var(--text-secondary);margin-bottom:20px">任务已通知相关责任人</p>
-        <button class="btn btn-primary" @click="resetForm" style="max-width:200px;margin:0 auto">继续发布</button>
+    <Teleport to="body">
+      <div v-if="showSuccess" class="slide-panel">
+        <div class="slide-overlay" @click="showSuccess = false"></div>
+        <div class="slide-content" style="padding:32px 24px;text-align:center">
+          <div style="font-size:48px;margin-bottom:12px">✅</div>
+          <h2 style="font-size:18px;font-weight:600;margin-bottom:8px">任务发布成功</h2>
+          <p style="color:var(--text-secondary);margin-bottom:20px">任务已通知相关责任人</p>
+          <button class="btn btn-primary" @click="resetForm" style="max-width:200px;margin:0 auto">继续发布</button>
+        </div>
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>
 

@@ -37,16 +37,49 @@
       </div>
 
       <div class="form-group">
+        <label class="form-label">任务分类 <span class="required">*</span></label>
+        <CategoryCascader v-model="category" />
+      </div>
+
+      <div class="form-group">
         <label class="form-label">输出物内容 <span class="required">*</span></label>
-        <textarea 
-          class="form-textarea" 
-          v-model="outputContent" 
-          placeholder="请输入输出物内容，如文件名、路径或文字描述..." 
+        <textarea
+          class="form-textarea"
+          v-model="outputContent"
+          placeholder="请输入输出物内容，如文件名、路径或文字描述..."
           rows="5"
         ></textarea>
       </div>
 
-      <button class="btn btn-primary" @click="handleSubmitOutput" :disabled="!outputContent.trim() || submitting">
+      <!-- Self-scoring section -->
+      <div class="form-group" v-if="selectedL3Info">
+        <label class="form-label">自行评分 <span class="required">*</span></label>
+        <div class="score-rule-hint">
+          <span class="tag" :class="'rule-' + (selectedL3Info.scoreRule || 'fixed')">{{ ruleLabel(selectedL3Info.scoreRule) }}</span>
+          <span v-if="selectedL3Info.scoreRule === 'fixed'" class="rule-text">参考分值 ≤ {{ selectedL3Info.scoreValue }}</span>
+          <span v-if="selectedL3Info.scoreRule === 'range'" class="rule-text">参考分值 {{ selectedL3Info.scoreValue }} - {{ selectedL3Info.scoreUpper }}</span>
+          <span v-if="selectedL3Info.scoreRule === 'any'" class="rule-text">任意分值</span>
+        </div>
+        <div class="score-input-row">
+          <div class="score-cell">
+            <label class="score-cell-label">分数</label>
+            <input v-model.number="selfScoreValue" type="number" step="0.5" min="0" class="form-input score-input" placeholder="分数" />
+          </div>
+          <div class="score-cell">
+            <label class="score-cell-label">数量</label>
+            <input v-model.number="selfScoreQty" type="number" step="0.5" min="0.5" class="form-input score-input" placeholder="数量" />
+          </div>
+          <div class="score-cell score-total-cell">
+            <label class="score-cell-label">总分</label>
+            <div class="score-total-display">{{ selfScoreTotal }}</div>
+          </div>
+        </div>
+        <div class="hint-line" v-if="selectedL3Info.scoreRule === 'fixed'">该分类固定分值为 {{ selectedL3Info.scoreValue }}，分数不得超过此值</div>
+        <div class="hint-line" v-if="selectedL3Info.scoreRule === 'range'">该分类分值区间为 {{ selectedL3Info.scoreValue }} - {{ selectedL3Info.scoreUpper }}</div>
+        <div class="hint-line" v-if="!selectedL3Info.scoreRule || selectedL3Info.scoreRule === 'any'">总分 = 分数 × 数量</div>
+      </div>
+
+      <button class="btn btn-primary" @click="handleSubmitOutput" :disabled="!canSubmit || submitting">
         {{ submitting ? '提交中...' : '提交输出物' }}
       </button>
     </div>
@@ -63,7 +96,15 @@
             </span>
             <span class="output-time">{{ out.createdAt }}</span>
           </div>
+          <div class="output-category" v-if="out.categoryL1Name || out.categoryL3Name">
+            <span class="cat-text">{{ out.categoryL1Name }} / {{ out.categoryL2Name }} / {{ out.categoryL3Name }}</span>
+          </div>
           <div class="output-content">{{ out.content }}</div>
+          <div v-if="out.scoreTotal !== undefined && out.scoreTotal !== null" class="output-score">
+            <span class="score-label">分值：</span>
+            <span class="score-text">{{ out.scoreValue }} × {{ out.scoreQuantity }} = <strong>{{ out.scoreTotal }}</strong></span>
+            <span class="output-rule" v-if="out.scoreRule">({{ ruleLabel(out.scoreRule) }})</span>
+          </div>
           <div v-if="out.reviewComment" class="output-review">
             审核意见: {{ out.reviewComment }}
           </div>
@@ -115,6 +156,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { taskAPI } from '../../api/index.js'
+import CategoryCascader from '../../components/CategoryCascader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,6 +165,39 @@ const loading = ref(true)
 const submitting = ref(false)
 const outputContent = ref('')
 const selectedSubtaskId = ref(null)
+const category = ref({ l1: null, l2: null, l3: null, rule: null })
+const selfScoreValue = ref(0)
+const selfScoreQty = ref(1)
+
+function ruleLabel(rule) {
+  return { fixed: '单值', range: '区间', any: '任意' }[rule] || ''
+}
+
+// Get L3 category info for score reference display
+const selectedL3Info = computed(() => {
+  if (!category.value.l3) return null
+  const rule = category.value.rule
+  if (!rule) return null
+  return {
+    scoreRule: rule.scoreRule || rule.score_rule || 'fixed',
+    scoreValue: rule.scoreValue ?? rule.score_value ?? 0,
+    scoreUpper: rule.scoreUpper ?? rule.score_upper ?? 0
+  }
+})
+
+const selfScoreTotal = computed(() => {
+  const total = (selfScoreValue.value || 0) * (selfScoreQty.value || 0)
+  return Math.round(total * 100) / 100
+})
+
+const canSubmit = computed(() => {
+  if (!outputContent.value.trim() || !category.value.l1 || !category.value.l2 || !category.value.l3) return false
+  // For daily_management tasks, self-scoring is required
+  if (task.value?.task_type === 'daily_management') {
+    return selfScoreValue.value > 0 && selfScoreQty.value > 0
+  }
+  return true
+})
 
 const progressColor = computed(() => {
   const p = task.value?.progress || 0
@@ -158,29 +233,51 @@ async function loadTask() {
 
 async function handleSubmitOutput() {
   if (!outputContent.value.trim()) return
+  if (!category.value.l1 || !category.value.l2 || !category.value.l3) {
+    alert('请选择一/二/三级分类')
+    return
+  }
   // If multiple subtasks, require selection
   if (myIncompleteSubtasks.value.length > 1 && !selectedSubtaskId.value) {
     alert('请选择要提交的子任务')
     return
   }
+  // For daily_management tasks, require self-scoring
+  if (task.value?.task_type === 'daily_management') {
+    if (!selfScoreValue.value || selfScoreValue.value <= 0) {
+      alert('请填写分数')
+      return
+    }
+    if (!selfScoreQty.value || selfScoreQty.value <= 0) {
+      alert('请填写数量')
+      return
+    }
+  }
   submitting.value = true
   try {
-    await taskAPI.submitOutput(task.value.id, {
+    const payload = {
       content: outputContent.value.trim(),
-      subtask_id: selectedSubtaskId.value
-    })
-    
+      subtask_id: selectedSubtaskId.value,
+      category_l1: category.value.l1,
+      category_l2: category.value.l2,
+      category_l3: category.value.l3
+    }
+    // Include self-score for daily_management tasks (and optionally for others)
+    if (task.value?.task_type === 'daily_management' && selfScoreValue.value > 0) {
+      payload.score_value = selfScoreValue.value
+      payload.score_quantity = selfScoreQty.value
+    }
+
+    await taskAPI.submitOutput(task.value.id, payload)
+
     // Reload task to check status after submit-output
     await loadTask()
-    
-    // For daily_management tasks that went to review (leader/admin initiated), auto-approve
-    if (task.value.task_type === 'daily_management' && task.value.status === 'review') {
-      await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务自动通过' })
-      await loadTask()
-    }
-    
+
     outputContent.value = ''
     selectedSubtaskId.value = null
+    category.value = { l1: null, l2: null, l3: null, rule: null }
+    selfScoreValue.value = 0
+    selfScoreQty.value = 1
   } catch (e) {
     alert(e.message)
   } finally {
@@ -287,4 +384,34 @@ onMounted(loadTask)
   appearance: none; cursor: pointer; outline: none; box-sizing: border-box;
 }
 .form-select-subtask:focus { border-color: var(--primary); }
+
+.score-rule-hint {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: #fafbfc; border-radius: 6px; margin-bottom: 10px; font-size: 12px;
+}
+.rule-text { color: var(--text); font-weight: 500; }
+.score-input-row { display: flex; gap: 12px; }
+.score-cell { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.score-cell-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+.score-input {
+  width: 100%; height: 36px; border: 1px solid var(--border); border-radius: 8px;
+  padding: 0 10px; font-size: 14px; color: var(--text); outline: none; box-sizing: border-box;
+}
+.score-input:focus { border-color: var(--primary); }
+.score-total-cell { flex: 0 0 100px; }
+.score-total-display {
+  height: 36px; display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700; color: var(--primary);
+  background: var(--primary-light, #e6f4ff); border-radius: 8px;
+}
+.hint-line { font-size: 11px; color: var(--text-caption); margin-top: 6px; }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+.rule-fixed { color: #fa8c16; background: #fff7e6; }
+.rule-range { color: #1677ff; background: #e6f4ff; }
+.rule-any { color: #8c8c8c; background: #f5f5f5; }
+.form-input {
+  width: 100%; border: 1px solid var(--border); border-radius: 8px;
+  padding: 0 12px; font-size: 14px; color: var(--text); outline: none;
+  box-sizing: border-box; background: #fff;
+}
 </style>

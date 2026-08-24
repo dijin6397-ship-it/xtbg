@@ -61,6 +61,8 @@ export const taskAPI = {
   submitComplete: (id, data) => request(`/tasks/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
   urge: (id, data) => request(`/tasks/${id}/urge`, { method: 'POST', body: JSON.stringify(data) }),
   recall: (id) => request(`/tasks/${id}/recall`, { method: 'PUT' }),
+  recallOutput: (id, outputId) => request(`/tasks/${id}/outputs/${outputId}/recall`, { method: 'PUT' }),
+  recallComplete: (id) => request(`/tasks/${id}/recall-complete`, { method: 'PUT' }),
   remove: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
   stats: () => request('/tasks/stats/overview')
 }
@@ -87,4 +89,20 @@ export const moduleAPI = {
   list: () => request('/modules'),
   myModules: () => request('/modules/my'),
   setUserModules: (userId, moduleIds) => request(`/modules/${userId}`, { method: 'PUT', body: JSON.stringify({ moduleIds }) })
+}
+
+export const dictionaryAPI = {
+  list: () => request('/dictionary'),
+  tree: () => request('/dictionary/tree'),
+  byLevel: (level, parentId) => {
+    const qs = parentId ? `?parentId=${parentId}` : ''
+    return request(`/dictionary/level/${level}${qs}`)
+  },
+  create: (data) => request('/dictionary', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => request(`/dictionary/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  remove: (id) => request(`/dictionary/${id}`, { method: 'DELETE' }),
+  report: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/dictionary/report${qs ? '?' + qs : ''}`)
+  }
 }

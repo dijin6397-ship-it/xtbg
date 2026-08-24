@@ -46,23 +46,25 @@
         <span class="topbar-title">{{ currentPageTitle }}</span>
         <div class="topbar-right">
           <img :src="logoImg" alt="Logo" class="topbar-logo" />
-          <div class="notif-bell" @click="showNotifs = !showNotifs">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span v-if="unreadCount > 0" class="notif-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-          </div>
-          <div v-if="showNotifs" class="notif-dropdown">
-            <div class="notif-header">
-              <span>消息通知</span>
-              <button class="notif-mark-read" @click="markAllRead">全部已读</button>
+          <div class="notif-bell-wrap" @click="showNotifs = !showNotifs">
+            <div class="notif-bell">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              <span v-if="unreadCount > 0" class="notif-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
             </div>
-            <div v-if="!notifications.length" class="notif-empty">暂无通知</div>
-            <div v-else class="notif-list">
-              <div v-for="n in notifications" :key="n.id" class="notif-item" :class="{ unread: !n.isRead }" @click="handleNotifClick(n)">
-                <div class="notif-title">{{ n.title }}</div>
-                <div class="notif-content">{{ n.content }}</div>
-                <div class="notif-meta">
-                  <span v-if="n.newDeadline">新截止日期: {{ n.newDeadline }}</span>
-                  <span class="notif-time">{{ n.createdAt }}</span>
+            <div v-if="showNotifs" class="notif-dropdown">
+              <div class="notif-header">
+                <span>消息通知</span>
+                <button class="notif-mark-read" @click.stop="markAllRead">全部已读</button>
+              </div>
+              <div v-if="!notifications.length" class="notif-empty">暂无通知</div>
+              <div v-else class="notif-list">
+                <div v-for="n in notifications" :key="n.id" class="notif-item" :class="{ unread: !n.isRead }" @click="handleNotifClick(n)">
+                  <div class="notif-title">{{ n.title }}</div>
+                  <div class="notif-content">{{ n.content }}</div>
+                  <div class="notif-meta">
+                    <span v-if="n.newDeadline">新截止日期: {{ n.newDeadline }}</span>
+                    <span class="notif-time">{{ n.createdAt }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -171,6 +173,18 @@ const menuItems = [
     label: '任务展示',
     roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'],
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
+  },
+  {
+    path: '/admin/report',
+    label: '报表统计',
+    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'],
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg>'
+  },
+  {
+    path: '/admin/dictionary',
+    label: '分类字典管理',
+    roles: ['admin'],
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h12a4 4 0 0 1 4 4v12a4 4 0 0 0-4-4H4z"/><path d="M4 4v16"/></svg>'
   }
 ]
 
@@ -190,7 +204,7 @@ function handleLogout() {
 .admin-layout { display: flex; min-height: 100vh; background: var(--bg); }
 
 .sidebar {
-  width: 240px; background: #001529; color: rgba(255,255,255,0.65);
+  width: 240px; background: #001529; color: #fff;
   display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0;
   z-index: 100; transition: width 0.25s ease; overflow: hidden;
 }
@@ -229,7 +243,7 @@ function handleLogout() {
 
 .topbar {
   height: 64px; background: #fff; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; padding: 0 24px; position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; padding: 0 24px; position: sticky; top: 0; z-index: 150;
 }
 .collapse-btn {
   background: none; border: none; cursor: pointer; padding: 6px;
@@ -238,7 +252,7 @@ function handleLogout() {
 }
 .collapse-btn:hover { background: var(--bg); color: var(--text); }
 .topbar-title { margin-left: 16px; font-size: 16px; font-weight: 600; color: var(--text); }
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 16px; position: relative; }
 .topbar-role { font-size: 12px; color: var(--primary); background: var(--primary-light); padding: 2px 8px; border-radius: 4px; }
 .user-info { display: flex; align-items: center; gap: 8px; }
 .avatar {
@@ -258,10 +272,11 @@ function handleLogout() {
 }
 
 .topbar-logo { height: 36px; margin-right: 8px; object-fit: contain; }
+.notif-bell-wrap { position: relative; }
 .notif-bell { position: relative; cursor: pointer; padding: 6px; border-radius: 6px; transition: background 0.2s; color: var(--text-secondary); }
 .notif-bell:hover { background: var(--bg); color: var(--text); }
 .notif-badge { position: absolute; top: 2px; right: 2px; background: #ff4d4f; color: #fff; font-size: 10px; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
-.notif-dropdown { position: absolute; top: 56px; right: 24px; width: 360px; max-height: 400px; background: #fff; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 400; overflow: hidden; border: 1px solid var(--border); }
+.notif-dropdown { position: absolute; top: calc(100% + 8px); right: 0; width: 360px; max-height: 400px; background: #fff; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.15); z-index: 400; overflow: hidden; border: 1px solid var(--border); }
 .notif-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
 .notif-mark-read { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 12px; }
 .notif-mark-read:hover { text-decoration: underline; }
