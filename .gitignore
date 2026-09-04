@@ -1,0 +1,22 @@
+node_modules/
+dist/
+server/data.db
+server/data.db-wal
+server/data.db-shm
+*.bak
+.DS_Store
+
+# 敏感信息 - 包含账号密码，禁止提交
+login.json
+
+# 本地工具与临时文件
+.workbuddy/
+.playwright-cli/
+test_pw.js
+test_pw.mjs
+open_login.mjs
+
+# 本地业务文档（不入库）
+xg.doc
+任务清单.xlsx
+task_summary.html
