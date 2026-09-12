@@ -1,0 +1,7 @@
+            <div v-if="out.scoreRule" class="output-score">
+              <span class="score-label">分值：</span>
+              <span v-if="out.scoreTotal > 0" class="score-text">{{ out.scoreValue }} x {{ out.scoreQuantity }} = <strong>{{ out.scoreTotal }}</strong></span>
+              <span v-else class="score-text score-placeholder">参考分值 {{ out.refScoreValue }} - {{ out.refScoreUpper }}</span>
+              <span class="output-rule">({{ ruleLabel(out.scoreRule) }})</span>
+              <span v-if="out.submitScore" class="self-score-tag">自评</span>
+            </div>

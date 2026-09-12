@@ -1,0 +1,81 @@
+﻿<template>
+  <div class="task-detail" v-if="task">
+    <div class="detail-left">
+      <button class="back-btn" @click="$router.push('/admin/tasks')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        杩斿洖鍒楄〃
+      </button>
+
+      <h1 class="task-title">{{ task.title }}</h1>
+
+      <div class="tags-row">
+        <span class="tag" :style="{ color: taskTypeMap[task.task_type]?.color, background: taskTypeMap[task.task_type]?.bg }">
+          {{ taskTypeMap[task.task_type]?.label }}
+        </span>
+        <span class="tag" :style="{ color: priorityMap[task.priority]?.color, background: priorityMap[task.priority]?.bg }">
+          {{ priorityMap[task.priority]?.label }}
+        </span>
+        <span class="tag" :style="{ color: statusMap[task.status]?.color, background: statusMap[task.status]?.bg }">
+          {{ statusMap[task.status]?.label }}
+        </span>
+      </div>
+
+      <div class="progress-section">
+        <div class="progress-header"><span>鎬昏繘搴?/span><span>{{ task.progress }}%</span></div>
+        <div class="progress-bar" style="width: 100%; height: 8px;">
+          <div class="progress-bar-fill" :style="{ width: task.progress + '%', background: task.progress === 100 ? 'var(--success)' : 'var(--primary)' }"></div>
+        </div>
+      </div>
+
+      <div class="desc-section" v-if="task.description">
+        <h3>浠诲姟鎻忚堪</h3>
+        <p>{{ task.description }}</p>
+      </div>
+
+      <!-- Subtasks -->
+      <div class="section" v-if="task.subtasks?.length">
+        <h3>瀛愪换鍔?({{ task.subtasks.length }})</h3>
+        <div class="subtask-list">
+          <div v-for="sub in task.subtasks" :key="sub.id" class="subtask-item">
+            <div class="subtask-info">
+              <span class="subtask-title">{{ sub.title }}</span>
+              <span class="subtask-assignee">{{ sub.assignee?.name || '鏈垎閰? }}</span>
+            </div>
+            <div class="subtask-right">
+              <span class="tag tag-sm" :style="{ color: statusMap[sub.status]?.color, background: statusMap[sub.status]?.bg }">{{ statusMap[sub.status]?.label }}</span>
+              <div class="progress-bar" style="width:80px;height:4px">
+                <div class="progress-bar-fill" :style="{ width: sub.progress + '%', background: 'var(--primary)' }"></div>
+              </div>
+              <span class="progress-text">{{ sub.progress }}%</span>
+              <span v-if="sub.deadline" class="subtask-deadline" :class="{ 'text-danger': new Date(sub.deadline) < new Date() && sub.status !== 'completed' }">{{ sub.deadline }}</span>
+              <button v-if="canSupervise && (isOverdue || task.status === 'overdue') && sub.status !== 'completed'" class="btn btn-sm btn-urge" @click="handleSubtaskUrge(sub.id)" title="鍌姙">馃摙</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section" v-if="task.outputs?.length">
+        <h3>杈撳嚭鐗?({{ task.outputs.length }})</h3>
+        <div class="output-list">
+          <div v-for="out in task.outputs" :key="out.id" class="output-item" :class="'output-' + out.status">
+            <div class="output-header">
+              <span class="output-user">{{ out.submitter?.name }}</span>
+              <span class="output-time">{{ out.createdAt }}</span>
+              <span class="tag tag-sm" :class="'output-status-' + out.status">
+                {{ { pending: '寰呭鏍?, approved: '宸查€氳繃', rejected: '宸查€€鍥? }[out.status] }}
+              </span>
+              <button v-if="out.status === 'pending' && canRecallOutput(out)" class="btn btn-sm btn-danger" @click="handleRecallOutput(out.id)">
+                鎾ゅ洖
+              </button>
+            </div>
+            <div class="output-content">{{ out.content }}</div>
+            <div v-if="out.categoryL1Name || out.categoryL3Name" class="output-category">
+              <span class="cat-text">{{ out.categoryL1Name }} / {{ out.categoryL2Name }} / {{ out.categoryL3Name }}</span>
+            </div>
+            <div v-if="out.scoreRule" class="output-score-ref">
+              <span class="tag" :class="ruleClass(out.scoreRule)">{{ ruleLabel(out.scoreRule) }}</span>
+              <span v-if="out.scoreRule === 'fixed'" class="score-ref-text">鍙傝€冨垎鍊?鈮?{{ out.refScoreValue }}</span>
+              <span v-if="out.scoreRule === 'range'" class="score-ref-text">鍙傝€冨垎鍊?{{ out.refScoreValue }} - {{ out.refScoreUpper }}</span>
+              <span v-if="out.scoreRule === 'any'" class="score-ref-text">浠绘剰鍒嗗€?/span>
+            </div>
