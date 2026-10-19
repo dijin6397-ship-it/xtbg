@@ -14,13 +14,13 @@
           <p>{{ mod.description }}</p>
         </div>
       </div>
-      <div v-if="authStore.user?.role === 'admin'" class="mms-card mms-card-admin" @click="goAccount">
+      <div v-if="canAccessBackend" class="mms-card mms-card-admin" @click="goBackend">
         <div class="mms-card-icon" style="background: linear-gradient(135deg, #722ed1, #9254de)">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </div>
         <div class="mms-card-info">
-          <h3>账号管理</h3>
-          <p>管理账号与模块权限</p>
+          <h3>后台管理</h3>
+          <p>账号权限与WBS字典维护</p>
         </div>
       </div>
     </div>
@@ -31,13 +31,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { authStore, logout } from '../../store/auth.js'
+import { authStore, logout, isAdmin } from '../../store/auth.js'
 import { moduleAPI } from '../../api/index.js'
 
 const router = useRouter()
 const modules = ref([])
+
+// 是否拥有「后台管理」模块权限（管理员默认拥有）
+const canAccessBackend = computed(() => {
+  if (isAdmin.value) return true
+  const mods = authStore.user?.modules || []
+  return mods.some(m => m.moduleKey === 'admin_backend')
+})
 
 onMounted(async () => {
   try {
@@ -53,17 +60,18 @@ function enterModule(mod) {
     router.push(mod.path)
   }
 }
-function goAccount() { router.push('/m/account') }
+function goBackend() { router.push('/admin/backend') }
 function handleLogout() { logout(); router.push('/admin/login?from=mobile') }
 
 function getModuleColor(key) {
-  const c = { project:'#1677ff', tech_quality:'#52c41a', procurement:'#fa8c16', admin_general:'#722ed1', hr:'#13c2c2', finance:'#faad14', manufacturing:'#ff4d4f', safety:'#fa541c' }
+  const c = { project:'#1677ff', tech_quality:'#52c41a', admin_backend:'#722ed1', procurement:'#fa8c16', admin_general:'#722ed1', hr:'#13c2c2', finance:'#faad14', manufacturing:'#ff4d4f', safety:'#fa541c' }
   return 'linear-gradient(135deg, ' + (c[key]||'#1677ff') + ', ' + (c[key]||'#1677ff') + '88)'
 }
 function getModuleIcon(key) {
   const i = {
     project: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
     tech_quality: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.01V21a4 4 0 0 1-8 0v-.09a1.65 1.65 0 0 0-1.01-2.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    admin_backend: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     procurement: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
     admin_general: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
     hr: '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',

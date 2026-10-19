@@ -2,6 +2,7 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { getDB } from '../db.js'
 import { generateToken, authMiddleware } from '../middleware/auth.js'
+import { parsePermissions } from '../permissions.js'
 
 const router = Router()
 
@@ -35,6 +36,7 @@ router.post('/login', (req, res) => {
     }
     const token = generateToken(user)
     const { password: _, ...safeUser } = user
+    safeUser.permissions = parsePermissions(user.permissions, user.role)
     safeUser.modules = getUserModules(db, user.id, user.role)
     res.json({ token, user: safeUser })
   } catch (err) {
@@ -46,6 +48,8 @@ router.post('/login', (req, res) => {
 router.get('/me', authMiddleware, (req, res) => {
   const db = getDB()
   const user = { ...req.user }
+  // authMiddleware 已把 permissions 解析为数组，这里兜底保证类型正确
+  user.permissions = parsePermissions(user.permissions, user.role)
   user.modules = getUserModules(db, user.id, user.role)
   res.json({ user })
 })

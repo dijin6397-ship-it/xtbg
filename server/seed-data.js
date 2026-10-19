@@ -173,10 +173,11 @@ export const allDepartments = [
 export const allModules = [
   { key: 'project',         name: '项目管理',       path: '/module/project',         description: '项目进度跟踪与协同管理', sort_order: 1 },
   { key: 'tech_quality',    name: '技术质量管理',   path: '/admin',                  description: '任务发布、分解、反馈与督办', sort_order: 2 },
-  { key: 'procurement',     name: '采购管理',       path: '/module/procurement',     description: '采购流程与供应商管理', sort_order: 3 },
-  { key: 'admin_general',   name: '行政综合管理',   path: '/module/admin-general',   description: '行政事务与综合协调', sort_order: 4 },
-  { key: 'hr',              name: '人事管理',       path: '/module/hr',              description: '人员信息与人事流程管理', sort_order: 5 },
-  { key: 'finance',         name: '财务管理',       path: '/module/finance',         description: '财务核算与预算管理', sort_order: 6 },
-  { key: 'manufacturing',   name: '生产制造管理',   path: '/module/manufacturing',   description: '生产计划与制造执行', sort_order: 7 },
-  { key: 'safety',          name: '安全管理',       path: '/module/safety',          description: '安全检查与隐患管理', sort_order: 8 },
+  { key: 'admin_backend',   name: '后台管理',       path: '/admin/backend',          description: '账号权限与WBS字典维护', sort_order: 3 },
+  { key: 'procurement',     name: '采购管理',       path: '/module/procurement',     description: '采购流程与供应商管理', sort_order: 4 },
+  { key: 'admin_general',   name: '行政综合管理',   path: '/module/admin-general',   description: '行政事务与综合协调', sort_order: 5 },
+  { key: 'hr',              name: '人事管理',       path: '/module/hr',              description: '人员信息与人事流程管理', sort_order: 6 },
+  { key: 'finance',         name: '财务管理',       path: '/module/finance',         description: '财务核算与预算管理', sort_order: 7 },
+  { key: 'manufacturing',   name: '生产制造管理',   path: '/module/manufacturing',   description: '生产计划与制造执行', sort_order: 8 },
+  { key: 'safety',          name: '安全管理',       path: '/module/safety',          description: '安全检查与隐患管理', sort_order: 9 },
 ]

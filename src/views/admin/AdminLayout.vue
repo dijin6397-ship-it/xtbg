@@ -86,7 +86,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { authStore, logout, roleMap } from '../../store/auth.js'
+import { authStore, logout, roleMap, canAccessBackend } from '../../store/auth.js'
 import { notificationAPI } from '../../api/index.js'
 import logoImg from '../../assets/logo.jpg'
 
@@ -147,19 +147,19 @@ const menuItems = [
   {
     path: '/admin/dashboard',
     label: '工作台',
-    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality', 'user'],
+    roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality', 'user'],
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>'
   },
   {
     path: '/admin/tasks',
     label: '任务管理',
-    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality', 'user'],
+    roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality', 'user'],
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>'
   },
   {
     path: '/admin/task-new',
     label: '新建任务',
-    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality', 'user'],
+    roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality', 'user'],
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
   },
   {
@@ -171,27 +171,32 @@ const menuItems = [
   {
     path: '/admin/showcase',
     label: '任务展示',
-    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'],
+    roles: ['admin', 'leader', 'supervisor'],
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>'
   },
   {
     path: '/admin/report',
     label: '报表统计',
-    roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'],
+    roles: ['admin', 'leader', 'supervisor'],
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg>'
   },
   {
-    path: '/admin/dictionary',
-    label: '分类字典管理',
-    roles: ['admin'],
-    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h12a4 4 0 0 1 4 4v12a4 4 0 0 0-4-4H4z"/><path d="M4 4v16"/></svg>'
+    path: '/admin/backend',
+    label: '后台管理',
+    roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality', 'user'],
+    icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
   }
 ]
 
 const visibleMenuItems = computed(() => {
   const role = authStore.user?.role
   if (!role) return []
-  return menuItems.filter(item => item.roles.includes(role))
+  return menuItems.filter(item => {
+    if (!item.roles.includes(role)) return false
+    // 「后台管理」还需具备 admin_backend 模块权限
+    if (item.path === '/admin/backend') return canAccessBackend.value
+    return true
+  })
 })
 
 function handleLogout() {

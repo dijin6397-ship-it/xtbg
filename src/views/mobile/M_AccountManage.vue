@@ -17,7 +17,8 @@
           <div class="ma-user-dept">{{ user.department }}</div>
           <div class="ma-user-modules">
             <span v-for="m in getAssignedModules(user)" :key="m.id" class="ma-module-tag">{{ m.name }}</span>
-            <span v-if="getAssignedModules(user).length === 0" class="ma-module-empty">无模块权限</span>
+            <span v-for="p in getUserPermissions(user)" :key="'perm-' + p" class="ma-perm-tag">{{ permLabel(p) }}</span>
+            <span v-if="getAssignedModules(user).length === 0 && getUserPermissions(user).length === 0" class="ma-module-empty">无模块权限</span>
           </div>
         </div>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c9cdd4" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -26,12 +27,13 @@
     <div v-if="editingUser" class="ma-modal-mask" @click.self="editingUser = null">
       <div class="ma-modal">
         <div class="ma-modal-header">
-          <h2>{{ editingUser.name }} - 模块权限</h2>
+          <h2>{{ editingUser.name }} - 权限设置</h2>
           <button class="ma-modal-close" @click="editingUser = null">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div class="ma-modal-body">
+          <div class="ma-section-title">模块权限</div>
           <div v-for="mod in allModules" :key="mod.id" class="ma-mod-toggle">
             <div class="ma-mod-info">
               <span class="ma-mod-name">{{ mod.name }}</span>
@@ -42,6 +44,18 @@
               <span class="ma-slider"></span>
             </label>
           </div>
+          <div class="ma-section-title">功能权限</div>
+          <div v-for="perm in allPermissions" :key="perm.key" class="ma-mod-toggle">
+            <div class="ma-mod-info">
+              <span class="ma-mod-name">{{ perm.label }}</span>
+              <span class="ma-mod-desc">{{ perm.key }}</span>
+            </div>
+            <label class="ma-switch">
+              <input type="checkbox" :checked="editedPermissions.includes(perm.key)" @change="togglePermission(perm)" />
+              <span class="ma-slider"></span>
+            </label>
+          </div>
+          <div v-if="allPermissions.length === 0" class="ma-mod-empty">暂无可配置的功能权限</div>
         </div>
         <div class="ma-modal-footer">
           <button class="ma-btn-save" @click="saveModules" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
@@ -69,8 +83,10 @@ async function api(url, opts = {}) {
 const search = ref('')
 const users = ref([])
 const allModules = ref([])
+const allPermissions = ref([])
 const editingUser = ref(null)
 const editedModules = ref([])
+const editedPermissions = ref([])
 const saving = ref(false)
 
 onMounted(async () => {
@@ -79,6 +95,10 @@ onMounted(async () => {
     users.value = data.users
     allModules.value = data.modules
   } catch (e) { console.error('Failed to load users', e) }
+  try {
+    const data = await api('/users/permissions')
+    allPermissions.value = data.permissions || []
+  } catch (e) { console.error('Failed to load permissions', e) }
 })
 
 const filteredUsers = computed(() => {
@@ -90,6 +110,13 @@ const filteredUsers = computed(() => {
 function getAssignedModules(user) {
   if (!user.modules) return []
   return user.modules.filter(m => m.assigned)
+}
+function getUserPermissions(user) {
+  return Array.isArray(user.permissions) ? user.permissions : []
+}
+function permLabel(key) {
+  const p = allPermissions.value.find(item => item.key === key)
+  return p ? p.label : key
 }
 function avatarColor(name) {
   const colors = ['#1677ff', '#52c41a', '#fa8c16', '#722ed1', '#eb2f96', '#13c2c2']
@@ -103,6 +130,7 @@ function editUser(user) {
     id: m.id,
     assigned: user.modules ? user.modules.some(um => um.id === m.id && um.assigned) : false
   }))
+  editedPermissions.value = getUserPermissions(user).slice()
 }
 function isAssigned(mod) {
   const em = editedModules.value.find(e => e.id === mod.id)
@@ -112,16 +140,24 @@ function toggleModule(mod) {
   const em = editedModules.value.find(e => e.id === mod.id)
   if (em) em.assigned = !em.assigned
 }
+function togglePermission(perm) {
+  const idx = editedPermissions.value.indexOf(perm.key)
+  if (idx >= 0) editedPermissions.value.splice(idx, 1)
+  else editedPermissions.value.push(perm.key)
+}
 async function saveModules() {
   saving.value = true
   try {
     const moduleIds = editedModules.value.filter(e => e.assigned).map(e => e.id)
+    const permissions = editedPermissions.value.slice()
     await api('/modules/' + editingUser.value.id, { method: 'PUT', body: JSON.stringify({ moduleIds }) })
+    await api('/users/' + editingUser.value.id, { method: 'PUT', body: JSON.stringify({ permissions }) })
     const user = users.value.find(u => u.id === editingUser.value.id)
     if (user) {
       user.modules = allModules.value.map(m => ({
         id: m.id, moduleKey: m.moduleKey, name: m.name, assigned: moduleIds.includes(m.id)
       }))
+      user.permissions = permissions
     }
     editingUser.value = null
   } catch (e) { alert('保存失败: ' + e.message) }
@@ -147,6 +183,7 @@ async function saveModules() {
 .ma-user-dept { font-size: 12px; color: #86909c; margin: 2px 0 6px; }
 .ma-user-modules { display: flex; flex-wrap: wrap; gap: 4px; }
 .ma-module-tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+.ma-perm-tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #e6f4ff; color: #1677ff; border: 1px solid #91caff; }
 .ma-module-empty { font-size: 11px; color: #c9cdd4; }
 .ma-modal-mask { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); z-index: 1000; display: flex; align-items: flex-end; justify-content: center; }
 .ma-modal { background: #fff; width: 100%; max-width: 480px; border-radius: 16px 16px 0 0; max-height: 80vh; overflow-y: auto; }
@@ -167,4 +204,8 @@ async function saveModules() {
 .ma-modal-footer { padding: 12px 20px 20px; }
 .ma-btn-save { width: 100%; height: 44px; background: #1677ff; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; }
 .ma-btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* 功能权限 */
+.ma-section-title { font-size: 12px; font-weight: 600; color: #86909c; padding: 12px 0 4px; }
+.ma-mod-empty { font-size: 12px; color: #c9cdd4; padding: 8px 0; }
 </style>

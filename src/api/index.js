@@ -36,11 +36,49 @@ export const userAPI = {
     const qs = new URLSearchParams(params).toString()
     return request(`/users${qs ? '?' + qs : ''}`)
   },
+  // 带「模块权限分配情况」的用户列表（账号管理页使用，需要后台管理模块权限）
+  full: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/users/full${qs ? '?' + qs : ''}`)
+  },
   get: (id) => request(`/users/${id}`),
   create: (data) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   remove: (id) => request(`/users/${id}`, { method: 'DELETE' }),
-  hardDelete: (id) => request(`/users/${id}/hard`, { method: 'DELETE' })
+  hardDelete: (id) => request(`/users/${id}/hard`, { method: 'DELETE' }),
+  // 可配置的细粒度权限清单
+  permissions: () => request('/users/permissions')
+}
+
+// WBS 数据字典（项目WBS - 车号），维护入口在账号选择页面的「WBS字典维护」
+export const wbsAPI = {
+  list: () => request('/wbs'),
+  tree: () => request('/wbs/tree'),
+  create: (data) => request('/wbs', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id, data) => request(`/wbs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  remove: (id) => request(`/wbs/${id}`, { method: 'DELETE' })
+}
+
+// 任务导入（独立权限 task_import）
+export const taskImportAPI = {
+  templateUrl: () => `${BASE}/task-import/template`,
+  // 需要带 token，所以用 fetch 下载 blob
+  async downloadTemplate() {
+    const token = getToken()
+    const res = await fetch(`${BASE}/task-import/template`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!res.ok) {
+      let msg = '模板下载失败'
+      try { msg = (await res.json()).error || msg } catch (e) { /* ignore */ }
+      throw new Error(msg)
+    }
+    return res.blob()
+  },
+  import: (fileBase64, dryRun = false) => request('/task-import/import', {
+    method: 'POST',
+    body: JSON.stringify({ fileBase64, dryRun })
+  })
 }
 
 export const taskAPI = {
@@ -54,6 +92,8 @@ export const taskAPI = {
   assign: (id, data) => request(`/tasks/${id}/assign`, { method: 'POST', body: JSON.stringify(data) }),
   addSubtasks: (id, subtasks) => request(`/tasks/${id}/subtasks`, { method: 'POST', body: JSON.stringify({ subtasks }) }),
   updateSubtask: (id, subId, data) => request(`/tasks/${id}/subtasks/${subId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  removeSubtask: (id, subId) => request(`/tasks/${id}/subtasks/${subId}`, { method: 'DELETE' }),
+  editPermission: (id) => request(`/tasks/${id}/edit-permission`),
   addFeedback: (id, data) => request(`/tasks/${id}/feedback`, { method: 'POST', body: JSON.stringify(data) }),
   submitOutput: (id, data) => request(`/tasks/${id}/submit-output`, { method: 'POST', body: JSON.stringify(data) }),
   reviewOutput: (id, data) => request(`/tasks/${id}/review-output`, { method: 'POST', body: JSON.stringify(data) }),

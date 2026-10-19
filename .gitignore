@@ -20,3 +20,6 @@ open_login.mjs
 xg.doc
 任务清单.xlsx
 task_summary.html
+
+# graphify 生成的分析产物（本地知识图谱，体积大且可重建）
+graphify-out/

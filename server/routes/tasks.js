@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getDB } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { requirePermission, hasPermission, PERMISSIONS } from '../permissions.js'
 
 const router = Router()
 
@@ -11,6 +12,153 @@ function getUserById(db, id) {
   const user = stmt.step() ? stmt.getAsObject() : null
   stmt.free()
   return user
+}
+
+// ---------------------------------------------------------------------------
+// WBS（项目号 / 车号）辅助函数
+// 任务上的 wbs_project_ids / wbs_car_ids 以 JSON 数组文本保存（支持多选）。
+// ---------------------------------------------------------------------------
+
+function parseIdList(raw) {
+  if (raw === null || raw === undefined || raw === '') return []
+  if (Array.isArray(raw)) return raw.map(Number).filter(n => Number.isFinite(n) && n > 0)
+  try {
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.map(Number).filter(n => Number.isFinite(n) && n > 0) : []
+  } catch (e) {
+    return String(raw).split(',').map(s => Number(String(s).trim())).filter(n => Number.isFinite(n) && n > 0)
+  }
+}
+
+function serializeIdList(list) {
+  if (!Array.isArray(list)) return ''
+  const clean = Array.from(new Set(list.map(Number).filter(n => Number.isFinite(n) && n > 0)))
+  return clean.length > 0 ? JSON.stringify(clean) : ''
+}
+
+// 根据 id 列表取出 WBS 条目（含所属项目信息）
+function resolveWbsItems(db, ids) {
+  if (!ids || ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(',')
+  const stmt = db.prepare(`SELECT id, level, parent_id, code, name FROM wbs_items WHERE id IN (${placeholders})`)
+  stmt.bind(ids)
+  const map = {}
+  while (stmt.step()) {
+    const r = stmt.getAsObject()
+    map[r.id] = { id: r.id, level: r.level, parentId: r.parent_id, code: r.code || '', name: r.name }
+  }
+  stmt.free()
+  // 保持传入顺序
+  return ids.map(id => map[id]).filter(Boolean)
+}
+
+// 把任务行上的 WBS 字段解析成对外的 { wbsProjects, wbsCars }
+function attachWbs(db, task) {
+  const projectIds = parseIdList(task.wbs_project_ids)
+  const carIds = parseIdList(task.wbs_car_ids)
+  const projects = resolveWbsItems(db, projectIds)
+  const cars = resolveWbsItems(db, carIds)
+
+  // 车号带上所属项目名，便于列表/详情直接展示
+  const carProjectIds = Array.from(new Set(cars.map(c => c.parentId).filter(Boolean)))
+  const carProjects = resolveWbsItems(db, carProjectIds)
+  const carProjectMap = {}
+  for (const p of carProjects) carProjectMap[p.id] = p
+
+  task.wbsProjects = projects
+  task.wbsCars = cars.map(c => ({ ...c, projectName: carProjectMap[c.parentId]?.name || '' }))
+  task.wbsProjectNames = projects.map(p => p.name)
+  task.wbsCarNames = cars.map(c => c.name)
+  return task
+}
+
+// 按 code 或 name 解析项目WBS / 车号（导入时使用，容错）
+function resolveWbsByText(db, text, level, parentId) {
+  const raw = String(text || '').trim()
+  if (!raw) return []
+  const parts = raw.split(/[、,，;；\/\|\s]+/).map(s => s.trim()).filter(Boolean)
+  const out = []
+  for (const part of parts) {
+    let sql = 'SELECT id, code, name FROM wbs_items WHERE level = ? AND active = 1 AND (code = ? OR name = ?)'
+    const params = [level, part, part]
+    if (parentId) { sql += ' AND parent_id = ?'; params.push(parentId) }
+    sql += ' LIMIT 1'
+    const stmt = db.prepare(sql)
+    stmt.bind(params)
+    const row = stmt.step() ? stmt.getAsObject() : null
+    stmt.free()
+    if (row && !out.some(o => o.id === row.id)) out.push({ id: row.id, code: row.code, name: row.name })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 任务编辑窗口：子任务填写完成后、截止日期之前，任务发起人可以继续修改任务
+// （新增/修改子任务、修改完成时间等）。
+// ---------------------------------------------------------------------------
+
+function isPastDeadline(task) {
+  if (!task?.deadline) return false
+  const dl = new Date(String(task.deadline).slice(0, 10) + 'T23:59:59')
+  if (isNaN(dl.getTime())) return false
+  return Date.now() > dl.getTime()
+}
+
+// 返回 { allowed: boolean, error?: string }
+function checkPublisherEditWindow(task, user) {
+  if (!task) return { allowed: false, error: '任务不存在' }
+  const isPublisher = Number(task.publisher_id) === Number(user.id)
+  const isAdminLike = ['admin', 'leader', 'supervisor'].includes(user.role)
+  if (isPublisher) {
+    if (task.status === 'completed' || task.status === 'cancelled') {
+      return { allowed: false, error: '任务已完成或已撤回，发起人不能再修改' }
+    }
+    if (isPastDeadline(task)) {
+      return { allowed: false, error: '已超过任务截止日期，发起人不能再修改' }
+    }
+    return { allowed: true }
+  }
+  if (isAdminLike) return { allowed: true }
+  return { allowed: false, error: '权限不足，仅任务发起人或管理员/主管/领导可修改' }
+}
+
+// ============================================================
+// 子任务分配/编辑权限（比任务编辑更严格）
+// 项目任务（自主修/问题整改/现场质量问题分析）遵循「谁发起谁分配子任务」：
+//   仅发起人本人或管理员可增删改子任务，其他主管/领导不得干预。
+// 其他任务类型沿用 checkPublisherEditWindow（管理员/主管/领导亦可）。
+// ============================================================
+function checkSubtaskAssignPermission(task, user) {
+  if (!task) return { allowed: false, error: '任务不存在' }
+  const isProjectTask = ['self_repair', 'rectification', 'quality_analysis'].includes(task.task_type)
+  const isPublisher = Number(task.publisher_id) === Number(user.id)
+  const isAdmin = user.role === 'admin'
+
+  if (isProjectTask) {
+    if (!isPublisher && !isAdmin) {
+      return { allowed: false, error: '权限不足：项目任务由发起人分配子任务' }
+    }
+    if (task.status === 'completed' || task.status === 'cancelled') {
+      return { allowed: false, error: '任务已完成或已撤回，不能再调整子任务' }
+    }
+    // 发起人本人（或管理员）在截止日期前可继续调整
+    if (isPublisher && !isAdmin && isPastDeadline(task)) {
+      return { allowed: false, error: '已超过任务截止日期，不能再调整子任务' }
+    }
+    return { allowed: true }
+  }
+
+  return checkPublisherEditWindow(task, user)
+}
+
+// 记录任务修改留痕
+function logTaskChange(db, taskId, userId, changeType, detail) {
+  try {
+    db.run(
+      'INSERT INTO task_change_logs (task_id, operator_id, change_type, detail) VALUES (?, ?, ?, ?)',
+      [taskId, userId, changeType || 'task', detail || '']
+    )
+  } catch (e) { /* noop */ }
 }
 
 // Helper: get full task with relations
@@ -26,6 +174,8 @@ function getFullTask(db, taskId) {
   if (task.assignee_id) {
     task.direct_assignee = getUserById(db, task.assignee_id)
   }
+
+  attachWbs(db, task)
 
   const aStmt = db.prepare(`
     SELECT u.id, u.username, u.name, u.role, u.title, u.department 
@@ -171,10 +321,48 @@ const taskTypeLabels = {
   daily_management: '部门日常管理'
 }
 
+// 按关键字解析 WBS 条目 id（项目WBS = level 1，车号 = level 2）
+// 支持按 code 或 name 模糊匹配，例如 "N-A228" / "0289"
+function resolveWbsIdsByKeyword(db, keyword, level) {
+  const kw = String(keyword || '').trim()
+  if (!kw) return []
+  const stmt = db.prepare(
+    'SELECT id FROM wbs_items WHERE level = ? AND active = 1 AND (code LIKE ? OR name LIKE ?)'
+  )
+  stmt.bind([level, `%${kw}%`, `%${kw}%`])
+  const ids = []
+  while (stmt.step()) ids.push(stmt.getAsObject().id)
+  stmt.free()
+  return ids
+}
+
+// 生成「JSON 数组包含指定 id」的 SQL 片段。
+// wbs_project_ids / wbs_car_ids 存的是 JSON 数字数组文本，如 "[17]"、"[17,18]"。
+// 不能直接用 LIKE '%17%'（会误匹配 117/170/1717），必须按数组位置精确匹配：
+//   单个元素      [17]        -> col = '[17]'
+//   首元素        [17,18]     -> col LIKE '[17,%'
+//   中间元素      [16,17,18]  -> col LIKE '%,17,%'
+//   末元素        [16,17]     -> col LIKE '%,17]'
+function jsonArrayContainsSql(column, ids) {
+  if (!ids || ids.length === 0) return null
+  const clauses = []
+  const params = []
+  for (const id of ids) {
+    clauses.push(`(${column} = ? OR ${column} LIKE ? OR ${column} LIKE ? OR ${column} LIKE ?)`)
+    params.push(
+      JSON.stringify([id]),      // [17]
+      '[' + id + ',%',           // [17,18  （首元素）
+      '%,' + id + ',%',          // ,17,   （中间元素）
+      '%,' + id + ']'            // ,17]   （末元素）
+    )
+  }
+  return { sql: '(' + clauses.join(' OR ') + ')', params }
+}
+
 // GET /api/tasks - List tasks with filters
 router.get('/', authMiddleware, (req, res) => {
   const db = getDB()
-  const { status, priority, task_type, search, my_tasks } = req.query
+  const { status, priority, task_type, search, my_tasks, publisher_id, publisher, wbs_project, wbs_car } = req.query
 
   let sql = 'SELECT t.* FROM tasks t WHERE 1=1'
   const params = []
@@ -185,6 +373,36 @@ router.get('/', authMiddleware, (req, res) => {
   if (search) {
     sql += ' AND (t.title LIKE ? OR t.description LIKE ?)'
     params.push(`%${search}%`, `%${search}%`)
+  }
+  // 发起人筛选：支持按 user id 精确匹配，也支持按姓名模糊匹配
+  if (publisher_id) {
+    sql += ' AND t.publisher_id = ?'
+    params.push(Number(publisher_id))
+  } else if (publisher) {
+    sql += ' AND t.publisher_id IN (SELECT id FROM users WHERE name LIKE ? OR username LIKE ?)'
+    params.push(`%${publisher}%`, `%${publisher}%`)
+  }
+
+  // 项目号（WBS元素）筛选：先按关键字解析出 WBS id，再匹配任务上的 JSON 数组
+  if (wbs_project) {
+    const ids = resolveWbsIdsByKeyword(db, wbs_project, 1)
+    if (ids.length === 0) {
+      return res.json({ tasks: [] })
+    }
+    const m = jsonArrayContainsSql('t.wbs_project_ids', ids)
+    sql += ' AND ' + m.sql
+    params.push(...m.params)
+  }
+
+  // 车号筛选：同上，level 2
+  if (wbs_car) {
+    const ids = resolveWbsIdsByKeyword(db, wbs_car, 2)
+    if (ids.length === 0) {
+      return res.json({ tasks: [] })
+    }
+    const m = jsonArrayContainsSql('t.wbs_car_ids', ids)
+    sql += ' AND ' + m.sql
+    params.push(...m.params)
   }
 
   if (my_tasks === 'true') {
@@ -222,7 +440,7 @@ router.get('/:id', authMiddleware, (req, res) => {
 
 // POST /api/tasks - Create task
 router.post('/', authMiddleware, (req, res) => {
-  const { title, description, task_type, priority, deadline, supervisor_id, assignee_ids, assignee_id, management_category, management_detail } = req.body
+  const { title, description, task_type, priority, deadline, supervisor_id, assignee_ids, assignee_id, management_category, management_detail, wbs_project_ids, wbs_car_ids } = req.body
 
   if (!task_type) {
     return res.status(400).json({ error: '请选择任务类型' })
@@ -231,10 +449,11 @@ router.post('/', authMiddleware, (req, res) => {
   // Role-based validation for task creation
   const userRole = req.user.role
   if (task_type === 'self_repair' || task_type === 'rectification' || task_type === 'quality_analysis') {
-    // Project tasks: only leader, supervisor_tech, supervisor_quality, admin
-    const allowedRoles = ['leader', 'supervisor_tech', 'supervisor_quality', 'admin']
+    // 项目任务：仅「主管(supervisor)」「领导(leader)」「管理员(admin)」可发起
+    // 说明：技术主管与质量主管已合并为统一的「主管」角色
+    const allowedRoles = ['leader', 'supervisor', 'admin']
     if (!allowedRoles.includes(userRole)) {
-      return res.status(403).json({ error: '权限不足：项目任务只能由领导、技术主管、质量主管或管理员发起' })
+      return res.status(403).json({ error: '权限不足：项目任务只能由主管、领导或管理员发起' })
     }
   } else if (task_type === 'key_work') {
     // Key work: only leader, admin
@@ -243,7 +462,7 @@ router.post('/', authMiddleware, (req, res) => {
       return res.status(403).json({ error: '权限不足：部门重点工作只能由领导或管理员发起' })
     }
   } else if (task_type === 'daily_management') {
-    // Daily management: all roles allowed (staff_tech, staff_quality, supervisor_tech, supervisor_quality, leader, admin)
+    // Daily management: all roles allowed
     // No restriction needed - all authenticated users can create
   }
 
@@ -255,19 +474,16 @@ router.post('/', authMiddleware, (req, res) => {
   const db = getDB()
   const publisherId = req.user.id
 
+  // ============================================================
+  // 「谁发起谁分配子任务、谁发起谁审核」：
+  // 项目任务（自主修/问题整改/现场质量问题分析）的 supervisor 统一设为发起人本人，
+  // 不再自动指向李俊南/蔡峥等固定主管。这样发起人即可分配子任务并审核输出物。
+  // 部门日常管理同样沿用「谁发起谁负责」。
+  // 部门重点工作保持原逻辑（可显式指定主管）。
+  // ============================================================
   let supId = supervisor_id
   if (!supId) {
-    if (task_type === 'self_repair' || task_type === 'rectification') {
-      const s = db.prepare("SELECT id FROM users WHERE name = '李俊南' AND active = 1")
-      if (s.step()) supId = s.getAsObject().id
-      s.free()
-    } else if (task_type === 'quality_analysis') {
-      const s = db.prepare("SELECT id FROM users WHERE name = '蔡峥' AND active = 1")
-      if (s.step()) supId = s.getAsObject().id
-      s.free()
-    } else if (task_type === 'daily_management') {
-      // daily_management 任务为“谁发起谁负责”模式：未指定主管时默认主管=发起人，
-      // 便于报表展示主管字段，并支持发起人（含主管/领导）自行提交输出物并审核
+    if (['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(task_type)) {
       supId = publisherId
     }
   }
@@ -280,9 +496,12 @@ router.post('/', authMiddleware, (req, res) => {
   if (task_type === 'key_work') {
     initialStatus = 'in_progress'
   } else if (task_type === 'daily_management') {
-    // daily_management 任务无需分解/分配流程，所有角色（员工/主管/领导/管理员）创建后直接进入进行中，
-    // 以便发起人（含主管/领导）可以立即提交输出物并自行评分审核
+    // daily_management 任务无需分解/分配流程，创建后直接进入进行中
     initialStatus = 'in_progress'
+  } else if (['self_repair', 'rectification', 'quality_analysis'].includes(task_type)) {
+    // 项目任务由发起人自行分配子任务，创建后直接进入「分解中」，
+    // 发起人随后在任务详情/分解页添加子任务与责任人
+    initialStatus = 'decomposing'
   }
 
   let fullDescription = description || ''
@@ -295,9 +514,9 @@ router.post('/', authMiddleware, (req, res) => {
   }
 
   db.run(`
-    INSERT INTO tasks (title, description, task_type, priority, status, publisher_id, supervisor_id, assignee_id, deadline, management_category, management_detail)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [taskTitle, fullDescription, task_type, priority || 'normal', initialStatus, publisherId, supId || null, assignee_id || null, deadline || null, management_category || '', management_detail || ''])
+    INSERT INTO tasks (title, description, task_type, priority, status, publisher_id, supervisor_id, assignee_id, deadline, management_category, management_detail, wbs_project_ids, wbs_car_ids)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [taskTitle, fullDescription, task_type, priority || 'normal', initialStatus, publisherId, supId || null, assignee_id || null, deadline || null, management_category || '', management_detail || '', serializeIdList(wbs_project_ids), serializeIdList(wbs_car_ids)])
 
   const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0]
 
@@ -314,29 +533,58 @@ router.post('/', authMiddleware, (req, res) => {
 })
 
 // PUT /api/tasks/:id - Update task
+// 权限：管理员/主管/领导，或【任务发起人】在「子任务填写完成后、截止日期之前」的窗口内。
 router.put('/:id', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const db = getDB()
 
-  const editAllowedRoles = ['admin', 'leader', 'supervisor_tech', 'supervisor_quality']
-  if (!editAllowedRoles.includes(req.user.role)) {
-    return res.status(403).json({ error: '权限不足，仅管理员/主管/领导可修改任务' })
+  const task = getFullTask(db, id)
+  if (!task) return res.status(404).json({ error: '任务不存在' })
+
+  const gate = checkPublisherEditWindow(task, req.user)
+  if (!gate.allowed) {
+    return res.status(403).json({ error: gate.error })
   }
 
-  const { title, description, priority, deadline, status, supervisor_id, task_type, assignee_id, management_category, management_detail } = req.body
+  const { title, description, priority, deadline, status, supervisor_id, task_type, assignee_id, management_category, management_detail, wbs_project_ids, wbs_car_ids } = req.body
+
+  // 发起人自主编辑时，不允许通过该接口改动流程关键字段（状态/主管/类型），
+  // 避免绕过既有流程；这些字段仅管理员/主管/领导可改。
+  const isPublisherOnly = Number(task.publisher_id) === Number(req.user.id) &&
+    !['admin', 'leader', 'supervisor'].includes(req.user.role)
 
   const updates = []
   const params = []
+  const changes = []
 
-  if (title !== undefined) { updates.push('title = ?'); params.push(title) }
-  if (description !== undefined) { updates.push('description = ?'); params.push(description) }
+  if (title !== undefined) {
+    updates.push('title = ?'); params.push(title)
+    if (title !== task.title) changes.push(`标题: ${task.title} → ${title}`)
+  }
+  if (description !== undefined) {
+    updates.push('description = ?'); params.push(description)
+    if (description !== task.description) changes.push('任务描述已更新')
+  }
   if (priority !== undefined) { updates.push('priority = ?'); params.push(priority) }
-  if (deadline !== undefined) { updates.push('deadline = ?'); params.push(deadline) }
-  if (status !== undefined) { updates.push('status = ?'); params.push(status) }
-  if (supervisor_id !== undefined) { updates.push('supervisor_id = ?'); params.push(supervisor_id) }
-  if (task_type !== undefined) { updates.push('task_type = ?'); params.push(task_type) }
+  if (deadline !== undefined) {
+    updates.push('deadline = ?'); params.push(deadline)
+    if ((deadline || '') !== (task.deadline || '')) changes.push(`完成时间(截止日期): ${task.deadline || '未设置'} → ${deadline || '未设置'}`)
+  }
+  if (!isPublisherOnly) {
+    if (status !== undefined) { updates.push('status = ?'); params.push(status) }
+    if (supervisor_id !== undefined) { updates.push('supervisor_id = ?'); params.push(supervisor_id) }
+    if (task_type !== undefined) { updates.push('task_type = ?'); params.push(task_type) }
+  }
   if (management_category !== undefined) { updates.push('management_category = ?'); params.push(management_category) }
   if (management_detail !== undefined) { updates.push('management_detail = ?'); params.push(management_detail) }
+  if (wbs_project_ids !== undefined) {
+    updates.push('wbs_project_ids = ?'); params.push(serializeIdList(wbs_project_ids))
+    changes.push('项目号(WBS)已更新')
+  }
+  if (wbs_car_ids !== undefined) {
+    updates.push('wbs_car_ids = ?'); params.push(serializeIdList(wbs_car_ids))
+    changes.push('车号已更新')
+  }
 
   if (updates.length > 0) {
     updates.push('updated_at = datetime("now","localtime")')
@@ -352,9 +600,30 @@ router.put('/:id', authMiddleware, (req, res) => {
     }
   }
 
+  if (changes.length > 0) {
+    logTaskChange(db, id, req.user.id, 'task', changes.join('；'))
+    db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "edit", ?)',
+      [id, req.user.id, '修改任务: ' + changes.join('；')])
+  }
+
+  const updated = getFullTask(db, id)
+  res.json({ task: updated })
+})
+
+// GET /api/tasks/:id/edit-permission - 当前用户能否修改该任务（用于前端按钮显隐）
+router.get('/:id/edit-permission', authMiddleware, (req, res) => {
+  const id = Number(req.params.id)
+  const db = getDB()
   const task = getFullTask(db, id)
   if (!task) return res.status(404).json({ error: '任务不存在' })
-  res.json({ task })
+  const gate = checkPublisherEditWindow(task, req.user)
+  res.json({
+    allowed: gate.allowed,
+    error: gate.error || '',
+    isPublisher: Number(task.publisher_id) === Number(req.user.id),
+    isPastDeadline: isPastDeadline(task),
+    canEditSubtasks: gate.allowed
+  })
 })
 
 // POST /api/tasks/:id/assign - Assign task to users
@@ -387,6 +656,7 @@ router.post('/:id/assign', authMiddleware, (req, res) => {
 })
 
 // POST /api/tasks/:id/subtasks - Add subtasks
+// 允许：管理员/主管/领导，或【任务发起人】在截止日期之前（子任务填写完成后仍可继续新增子任务）
 router.post('/:id/subtasks', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const { subtasks } = req.body
@@ -396,36 +666,115 @@ router.post('/:id/subtasks', authMiddleware, (req, res) => {
     return res.status(400).json({ error: '请提供子任务列表' })
   }
 
+  const task = getFullTask(db, id)
+  if (!task) return res.status(404).json({ error: '任务不存在' })
+
+  const gate = checkSubtaskAssignPermission(task, req.user)
+  if (!gate.allowed) {
+    return res.status(403).json({ error: gate.error })
+  }
+
+  const added = []
   for (const st of subtasks) {
-    db.run('INSERT INTO subtasks (task_id, title, assignee_id) VALUES (?, ?, ?)', [id, st.title, st.assignee_id])
+    if (!st || !st.title) continue
+    db.run('INSERT INTO subtasks (task_id, title, assignee_id, deadline) VALUES (?, ?, ?, ?)',
+      [id, st.title, st.assignee_id || null, st.deadline || ''])
+    added.push(st.title)
   }
 
   db.run('UPDATE tasks SET status = "in_progress", updated_at = datetime("now","localtime") WHERE id = ? AND status = "pending"', [id])
 
-  const task = getFullTask(db, id)
-  res.json({ task })
+  if (added.length > 0) {
+    logTaskChange(db, id, req.user.id, 'subtask', '新增子任务: ' + added.join('、'))
+    db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "edit", ?)',
+      [id, req.user.id, '新增子任务: ' + added.join('、')])
+  }
+
+  const updated = getFullTask(db, id)
+  res.json({ task: updated })
 })
 
 // PUT /api/tasks/:id/subtasks/:subId - Update subtask
+// 允许：管理员/主管/领导，或【任务发起人】在截止日期之前修改子任务标题/执行人/完成时间/进度
 router.put('/:id/subtasks/:subId', authMiddleware, (req, res) => {
   const taskId = Number(req.params.id)
   const subId = Number(req.params.subId)
-  const { status, progress } = req.body
+  const { status, progress, title, assignee_id, deadline } = req.body
   const db = getDB()
+
+  const task = getFullTask(db, taskId)
+  if (!task) return res.status(404).json({ error: '任务不存在' })
+
+  const sub = (task.subtasks || []).find(s => Number(s.id) === subId)
+  if (!sub) return res.status(404).json({ error: '子任务不存在' })
+
+  const gate = checkSubtaskAssignPermission(task, req.user)
+  if (!gate.allowed) {
+    return res.status(403).json({ error: gate.error })
+  }
+
+  const isPublisherOnly = Number(task.publisher_id) === Number(req.user.id) &&
+    !['admin', 'leader', 'supervisor'].includes(req.user.role)
 
   const updates = []
   const params = []
-  if (status !== undefined) { updates.push('status = ?'); params.push(status) }
-  if (progress !== undefined) { updates.push('progress = ?'); params.push(progress) }
+  const changes = []
+  if (status !== undefined && !isPublisherOnly) { updates.push('status = ?'); params.push(status) }
+  if (progress !== undefined && !isPublisherOnly) { updates.push('progress = ?'); params.push(progress) }
+  if (title !== undefined) {
+    updates.push('title = ?'); params.push(title)
+    if (title !== sub.title) changes.push(`子任务标题: ${sub.title} → ${title}`)
+  }
+  if (assignee_id !== undefined) {
+    updates.push('assignee_id = ?'); params.push(assignee_id || null)
+    changes.push('子任务执行人已调整')
+  }
+  if (deadline !== undefined) {
+    updates.push('deadline = ?'); params.push(deadline || '')
+    if ((deadline || '') !== (sub.deadline || '')) changes.push(`子任务完成时间: ${sub.deadline || '未设置'} → ${deadline || '未设置'}`)
+  }
 
   if (updates.length > 0) {
     params.push(subId, taskId)
     db.run(`UPDATE subtasks SET ${updates.join(', ')} WHERE id = ? AND task_id = ?`, params)
   }
 
+  if (changes.length > 0) {
+    logTaskChange(db, taskId, req.user.id, 'subtask', `[${sub.title}] ` + changes.join('；'))
+    db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "edit", ?)',
+      [taskId, req.user.id, `修改子任务[${sub.title}]: ` + changes.join('；')])
+  }
+
   recalcProgress(db, taskId)
+  const updated = getFullTask(db, taskId)
+  res.json({ task: updated })
+})
+
+// DELETE /api/tasks/:id/subtasks/:subId - 删除子任务（发起人窗口内 / 管理员/主管/领导）
+router.delete('/:id/subtasks/:subId', authMiddleware, (req, res) => {
+  const taskId = Number(req.params.id)
+  const subId = Number(req.params.subId)
+  const db = getDB()
+
   const task = getFullTask(db, taskId)
-  res.json({ task })
+  if (!task) return res.status(404).json({ error: '任务不存在' })
+
+  const sub = (task.subtasks || []).find(s => Number(s.id) === subId)
+  if (!sub) return res.status(404).json({ error: '子任务不存在' })
+
+  const gate = checkSubtaskAssignPermission(task, req.user)
+  if (!gate.allowed) {
+    return res.status(403).json({ error: gate.error })
+  }
+
+  db.run('DELETE FROM subtasks WHERE id = ? AND task_id = ?', [subId, taskId])
+  logTaskChange(db, taskId, req.user.id, 'subtask', `删除子任务: ${sub.title}`)
+  db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "edit", ?)',
+    [taskId, req.user.id, `删除子任务: ${sub.title}`])
+
+  recalcProgress(db, taskId)
+  const updated = getFullTask(db, taskId)
+  res.json({ task: updated })
 })
 
 // POST /api/tasks/:id/feedback - Add feedback/comment
@@ -534,13 +883,54 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
   res.json({ task })
 })
 
-// POST /api/tasks/:id/review-output - Supervisor reviews output
+// POST /api/tasks/:id/review-output - 审核输出物
+// 规则：项目任务（自主修/问题整改/现场质量问题分析）由「发起人本人」审核（谁发起谁审核）；
+//       部门日常管理同样由发起人审核；部门重点工作由领导/管理员审核。
 router.post('/:id/review-output', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const { output_id, approved, comment, score_value, score_quantity } = req.body
   const db = getDB()
 
   if (!output_id) return res.status(400).json({ error: '缺少输出物ID' })
+
+  // 审核权限校验
+  const taskRow = db.prepare('SELECT task_type, publisher_id, supervisor_id FROM tasks WHERE id = ?')
+  taskRow.bind([id])
+  const tInfo = taskRow.step() ? taskRow.getAsObject() : null
+  taskRow.free()
+  if (!tInfo) return res.status(404).json({ error: '任务不存在' })
+
+  const uid = req.user.id
+  const role = req.user.role
+  const isProjectTask = ['self_repair', 'rectification', 'quality_analysis'].includes(tInfo.task_type)
+  const isDaily = tInfo.task_type === 'daily_management'
+  const isPublisher = Number(tInfo.publisher_id) === Number(uid)
+
+  let canReview = false
+  if (role === 'admin') {
+    canReview = true
+  } else if (isProjectTask || isDaily) {
+    // 谁发起谁审核：发起人本人即可审核该任务下所有输出物
+    canReview = isPublisher
+  } else {
+    // 部门重点工作：领导或本任务主管审核
+    canReview = role === 'leader' || Number(tInfo.supervisor_id) === Number(uid)
+  }
+
+  // 兜底：仅「部门日常管理」允许提交人审核自己提交的输出物
+  // （该类型任务由发起人本人提交并自评，若不放开会导致输出物无人可审、任务卡死）。
+  // 项目任务必须由发起人审核，提交人不得自审——即使提交人恰好也是发起人以外的人。
+  if (!canReview && isDaily) {
+    const ownPending = db.prepare('SELECT COUNT(*) AS c FROM task_outputs WHERE id = ? AND task_id = ? AND user_id = ?')
+    ownPending.bind([output_id, id, uid])
+    const ownRow = ownPending.step() ? ownPending.getAsObject() : null
+    ownPending.free()
+    if (ownRow && ownRow.c > 0) canReview = true
+  }
+
+  if (!canReview) {
+    return res.status(403).json({ error: '权限不足：项目任务由发起人审核，部门重点工作由领导审核' })
+  }
 
   // Resolve the output and its reference rule
   const outStmt = db.prepare('SELECT category_l3 FROM task_outputs WHERE id = ? AND task_id = ?')
@@ -605,7 +995,8 @@ router.post('/:id/review-output', authMiddleware, (req, res) => {
       const newProgress = recalcProgress(db, id)
       // If all subtasks completed (100%)
       if (newProgress === 100) {
-        // For overdue/key_work tasks, require leader final approval
+        // 仅「部门重点工作」需要领导最终审批；
+        // 项目任务（谁发起谁审核）与日常管理由发起人审核通过后直接完成。
         const tCheck = db.prepare('SELECT task_type, status FROM tasks WHERE id = ?')
         tCheck.bind([id])
         const tRow = tCheck.step() ? tCheck.getAsObject() : null
@@ -870,7 +1261,7 @@ router.delete('/:id', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const db = getDB()
 
-  const deleteAllowedRoles = ['admin', 'leader', 'supervisor_tech', 'supervisor_quality']
+  const deleteAllowedRoles = ['admin', 'leader', 'supervisor']
   if (!deleteAllowedRoles.includes(req.user.role)) {
     return res.status(403).json({ error: '权限不足，仅管理员/主管/领导可删除任务' })
   }

@@ -41,6 +41,18 @@ export async function initDB() {
     addCol('score_total', 'REAL DEFAULT 0')
   } catch (e) { /* noop */ }
 
+  // Migration: 任务修改记录（发起人在截止日期前修改任务/子任务时留痕）
+  db.run(`
+    CREATE TABLE IF NOT EXISTS task_change_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+      operator_id INTEGER REFERENCES users(id),
+      change_type TEXT DEFAULT 'task',
+      detail TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `)
+
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +65,7 @@ export async function initDB() {
       active INTEGER DEFAULT 1,
       employee_code TEXT DEFAULT '',
       department_code TEXT DEFAULT '',
+      permissions TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )
   `)
@@ -73,6 +86,9 @@ export async function initDB() {
       assignee_id INTEGER,
       management_category TEXT DEFAULT '',
       management_detail TEXT DEFAULT '',
+      wbs_project_ids TEXT DEFAULT '',
+      wbs_car_ids TEXT DEFAULT '',
+      import_batch TEXT DEFAULT '',
       completed_at TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now','localtime')),
       updated_at TEXT DEFAULT (datetime('now','localtime'))
@@ -208,6 +224,47 @@ export async function initDB() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_dict_parent ON dict_categories(parent_id)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_dict_level ON dict_categories(level)`)
 
+  // ============ WBS 数据字典（项目WBS - 车号，两级层级） ============
+  // 项目号（WBS 元素）如 N-A228，下级为四位车号如 0289。
+  // 与 dict_categories（输出物分类/评分）相互独立，避免影响评分规则逻辑。
+  db.run(`
+    CREATE TABLE IF NOT EXISTS wbs_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level INTEGER NOT NULL,               -- 1 = 项目WBS，2 = 车号
+      parent_id INTEGER REFERENCES wbs_items(id) ON DELETE CASCADE,
+      code TEXT DEFAULT '',                 -- 项目WBS编码 / 四位车号
+      name TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_wbs_parent ON wbs_items(parent_id)`)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_wbs_level ON wbs_items(level)`)
+
+  // Migration: 用户细粒度权限（JSON 数组，如 ["task_import"]）
+  try {
+    const uCols = db.exec("PRAGMA table_info(users)")
+    const uExisting = uCols[0] ? uCols[0].values.map(r => r[1]) : []
+    if (uExisting.length > 0 && !uExisting.includes('permissions')) {
+      db.run("ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT ''")
+    }
+  } catch (e) { /* noop */ }
+
+  // Migration: 任务上的 WBS 项目号 / 车号（JSON 数组文本，支持多选）
+  try {
+    const tCols = db.exec("PRAGMA table_info(tasks)")
+    const tExisting = tCols[0] ? tCols[0].values.map(r => r[1]) : []
+    const addTaskCol = (name, type) => {
+      if (!tExisting.includes(name)) {
+        try { db.run(`ALTER TABLE tasks ADD COLUMN ${name} ${type}`) } catch (e) {}
+      }
+    }
+    addTaskCol('wbs_project_ids', "TEXT DEFAULT ''")
+    addTaskCol('wbs_car_ids', "TEXT DEFAULT ''")
+    addTaskCol('import_batch', "TEXT DEFAULT ''")
+  } catch (e) { /* noop */ }
+
   // Migration: daily_management tasks don't need decompose/assign flow,
   // auto-set historical pending ones to in_progress so supervisors/leaders can submit outputs directly
   try {
@@ -218,6 +275,30 @@ export async function initDB() {
   // 保证报表“主管”字段有值，且发起人（含主管/领导）可自行提交输出物并审核
   try {
     db.run(`UPDATE tasks SET supervisor_id = publisher_id, updated_at = datetime('now','localtime') WHERE task_type = 'daily_management' AND supervisor_id IS NULL`)
+  } catch (e) { /* noop */ }
+
+  // ============================================================
+  // Migration: 角色合并 —— 技术主管(supervisor_tech) + 质量主管(supervisor_quality) 合并为「主管(supervisor)」
+  // 合并后：项目任务（自主修/问题整改/现场质量问题分析）由主管/领导发起，
+  // 且「谁发起谁分配子任务、谁发起谁审核」，不再依赖 supervisor_id 指向他人。
+  // ============================================================
+  try {
+    db.run(`UPDATE users SET role = 'supervisor' WHERE role IN ('supervisor_tech', 'supervisor_quality')`)
+  } catch (e) { /* noop */ }
+
+  // Migration: 项目类任务的 supervisor 字段统一指向发起人（谁发起谁负责审核）
+  try {
+    db.run(`UPDATE tasks SET supervisor_id = publisher_id, updated_at = datetime('now','localtime')
+            WHERE task_type IN ('self_repair','rectification','quality_analysis')
+              AND (supervisor_id IS NULL OR supervisor_id != publisher_id)`)
+  } catch (e) { /* noop */ }
+
+  // Migration: 新增「后台管理」模块，并把它分配给原本拥有字典/账号管理能力的管理员
+  try {
+    const modCount = db.exec("SELECT COUNT(*) FROM modules WHERE module_key = 'admin_backend'")
+    if ((modCount[0]?.values[0]?.[0] || 0) === 0) {
+      db.run(`INSERT INTO modules (module_key, name, path, description, sort_order) VALUES ('admin_backend', '后台管理', '/admin/backend', '账号权限与WBS字典维护', 3)`)
+    }
   } catch (e) { /* noop */ }
 
   return db
@@ -240,6 +321,7 @@ export function seedIfEmpty() {
   if (count > 0) {
     importOrgData()
     seedDictionaryIfEmpty()
+    seedWbsIfEmpty()
     saveDB()
     return
   }
@@ -251,8 +333,8 @@ export function seedIfEmpty() {
     ['guanyujing',bcryptHash, '关宇敬',   '技术质量部', 'leader',           '总经理助理',  '013200029620'],
     ['fuwei',     bcryptHash, '付巍',     '技术质量部', 'leader',           '技术总监',    '013265000138'],
     ['xuwenbin',  bcryptHash, '徐文彬',   '技术质量部', 'leader',           '部门副经理',  '013265000009'],
-    ['lijunnan',  bcryptHash, '李俊南',   '技术质量部', 'supervisor_tech',  '研发主管',    '013265000112'],
-    ['caizheng',  bcryptHash, '蔡峥',     '技术质量部', 'supervisor_quality','质量主管',   '013265000039'],
+    ['lijunnan',  bcryptHash, '李俊南',   '技术质量部', 'supervisor',       '研发主管',    '013265000112'],
+    ['caizheng',  bcryptHash, '蔡峥',     '技术质量部', 'supervisor',       '质量主管',    '013265000039'],
     ['yangchen',  bcryptHash, '杨晨',     '技术质量部', 'staff_tech',       '技术员',      '013265000046'],
     ['caoyifeng', bcryptHash, '曹毅峰',   '技术质量部', 'staff_tech',       '技术员',      '013265000045'],
     ['yaoyichao', bcryptHash, '姚逸超',   '技术质量部', 'staff_tech',       '技术员',      '013265000069'],
@@ -344,6 +426,17 @@ function importOrgData() {
     }
   }
 
+  // 「后台管理」模块：默认授予部门主管与领导（管理员另有全量授权），其余用户由管理员在后台按需配置
+  const backendModId = modMap['admin_backend']
+  if (backendModId) {
+    const backendUsers = db.exec("SELECT id FROM users WHERE department = '技术质量部' AND role IN ('leader','supervisor')")
+    if (backendUsers.length > 0) {
+      for (const row of backendUsers[0].values) {
+        try { db.run('INSERT OR IGNORE INTO user_modules (user_id, module_id) VALUES (?, ?)', [row[0], backendModId]) } catch(e) {}
+      }
+    }
+  }
+
     db.run("UPDATE users SET department = '公司' WHERE username = 'admin'")
 
 const adminUser = db.exec("SELECT id FROM users WHERE username = 'admin'")
@@ -355,6 +448,7 @@ const adminUser = db.exec("SELECT id FROM users WHERE username = 'admin'")
   }
 
   seedDictionaryIfEmpty()
+  seedWbsIfEmpty()
   saveDB()
 }
 
@@ -617,6 +711,38 @@ function seedDictionaryIfEmpty() {
       for (const l3 of (l2.l3 || [])) {
         insertCat(3, l2Id, l3.name, l3.rule || 'any', l3.score || 0, l3.high || 0)
       }
+    }
+  }
+}
+
+// ============================================================
+// WBS 数据字典（项目WBS - 车号）默认数据
+// 层级：项目号(WBS元素，如 N-A228) -> 车号(四位，如 0289)
+// 管理员可在「WBS字典维护」页面自行增删改，这里只提供少量示例种子。
+// ============================================================
+function seedWbsIfEmpty() {
+  const existing = db.exec('SELECT COUNT(*) FROM wbs_items')
+  const count = existing[0]?.values[0]?.[0] || 0
+  if (count > 0) return
+
+  const tree = [
+    { code: 'N-A228', name: 'N-A228', cars: ['0289', '0290', '0291'] },
+    { code: 'N-A229', name: 'N-A229', cars: ['0301', '0302'] },
+    { code: 'N-A230', name: 'N-A230', cars: ['0315'] }
+  ]
+
+  let order = 1
+  for (const proj of tree) {
+    db.run(
+      `INSERT INTO wbs_items (level, parent_id, code, name, sort_order, active) VALUES (1, NULL, ?, ?, ?, 1)`,
+      [proj.code, proj.name, order++]
+    )
+    const projId = db.exec('SELECT last_insert_rowid()')[0].values[0][0]
+    for (const car of proj.cars) {
+      db.run(
+        `INSERT INTO wbs_items (level, parent_id, code, name, sort_order, active) VALUES (2, ?, ?, ?, ?, 1)`,
+        [projId, car, car, order++]
+      )
     }
   }
 }

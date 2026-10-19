@@ -1,16 +1,13 @@
 import { Router } from 'express'
 import { getDB } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { requireBackendModule } from '../module-access.js'
 
 const router = Router()
 
-function requireAdmin(req, res) {
-  if (req.user.role !== 'admin') {
-    res.status(403).json({ error: '需要管理员权限' })
-    return false
-  }
-  return true
-}
+// 分类字典的维护接口（POST/PUT/DELETE）需要「后台管理」模块权限或管理员，
+// 与 WBS 字典、账号管理保持一致：拥有 admin_backend 模块即可维护。
+// 读取接口（GET）对所有登录用户开放，任务反馈/报表需要读取分类。
 
 function rowToCategory(row) {
   return {
@@ -66,8 +63,7 @@ router.get('/tree', authMiddleware, (req, res) => {
 })
 
 // POST /api/dictionary - create a category (admin)
-router.post('/', authMiddleware, (req, res) => {
-  if (!requireAdmin(req, res)) return
+router.post('/', authMiddleware, requireBackendModule, (req, res) => {
   const { level, parentId, name, scoreRule, scoreValue, scoreUpper, sortOrder } = req.body
   if (!level || ![1, 2, 3].includes(Number(level))) {
     return res.status(400).json({ error: 'level 必须是 1 / 2 / 3' })
@@ -93,8 +89,7 @@ router.post('/', authMiddleware, (req, res) => {
 })
 
 // PUT /api/dictionary/:id - update a category
-router.put('/:id', authMiddleware, (req, res) => {
-  if (!requireAdmin(req, res)) return
+router.put('/:id', authMiddleware, requireBackendModule, (req, res) => {
   const id = Number(req.params.id)
   const { name, scoreRule, scoreValue, scoreUpper, sortOrder, active } = req.body
   const db = getDB()
@@ -113,8 +108,7 @@ router.put('/:id', authMiddleware, (req, res) => {
 })
 
 // DELETE /api/dictionary/:id - delete a category (cascade children)
-router.delete('/:id', authMiddleware, (req, res) => {
-  if (!requireAdmin(req, res)) return
+router.delete('/:id', authMiddleware, requireBackendModule, (req, res) => {
   const id = Number(req.params.id)
   const db = getDB()
   // Reject if any task_output references this category

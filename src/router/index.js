@@ -60,7 +60,9 @@ const routes = [
       { path: 'showcase', name: 'AdminShowcase', component: () => import('../views/admin/A_Showcase.vue'), meta: { title: '任务展示' } },
       { path: 'report', name: 'AdminReport', component: () => import('../views/admin/A_Report.vue'), meta: { title: '报表统计' } },
       { path: 'dictionary', name: 'AdminDictionary', component: () => import('../views/admin/A_Dictionary.vue'), meta: { title: '分类字典管理', roles: ['admin'] } },
-      { path: 'users', name: 'AdminUsers', component: () => import('../views/admin/A_UserManagement.vue'), meta: { title: '账号管理', roles: ['admin'] } }
+      { path: 'wbs', name: 'AdminWbsDictionary', component: () => import('../views/admin/A_WbsDictionary.vue'), meta: { title: 'WBS字典维护' } },
+      { path: 'users', name: 'AdminUsers', component: () => import('../views/admin/A_UserManagement.vue'), meta: { title: '账号管理', roles: ['admin'] } },
+      { path: 'backend', name: 'AdminBackend', component: () => import('../views/admin/A_Backend.vue'), meta: { title: '后台管理' } }
     ]
   }
 ]

@@ -10,7 +10,40 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input v-model="searchText" type="text" placeholder="搜索任务标题..." class="search-input" />
       </div>
+      <div class="search-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <input v-model="publisherSearch" type="text" placeholder="搜索发起人..." class="search-input" />
+      </div>
+      <select v-model="filterPublisherId" class="form-select filter-select">
+        <option value="">全部发起人</option>
+        <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name || u.username }}</option>
+      </select>
+      <div class="search-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><path d="M10 6.5h4a3 3 0 0 1 3 3v4"/></svg>
+        <input v-model="wbsProjectSearch" type="text" placeholder="搜索项目号(WBS)..." class="search-input" />
+      </div>
+      <select v-model="filterWbsProjectId" class="form-select filter-select">
+        <option value="">全部项目号</option>
+        <option v-for="p in wbsProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
+      </select>
+      <div class="search-box">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 17h14M6 17V9a6 6 0 0 1 12 0v8"/><circle cx="8" cy="21" r="1"/><circle cx="16" cy="21" r="1"/></svg>
+        <input v-model="wbsCarSearch" type="text" placeholder="搜索车号..." class="search-input" />
+      </div>
+      <select v-model="filterWbsCarId" class="form-select filter-select">
+        <option value="">全部车号</option>
+        <option v-for="c in wbsCars" :key="c.id" :value="c.id">{{ c.name }}{{ c.projectName ? ' (' + c.projectName + ')' : '' }}</option>
+      </select>
       <button class="btn btn-export" @click="exportExcel">📊 导出Excel</button>
+      <template v-if="canImportTasks">
+        <button class="btn btn-template" :disabled="downloading" @click="downloadTemplate">
+          {{ downloading ? '下载中...' : '📥 下载模板' }}
+        </button>
+        <button class="btn btn-template" :disabled="importing" @click="triggerImport">
+          {{ importing ? '上传中...' : '📤 导入Excel' }}
+        </button>
+        <input ref="fileInputRef" type="file" accept=".xlsx,.xls" class="file-input" @change="handleImportFile" />
+      </template>
       <div class="filter-group">
         <select v-model="filterType" class="form-select filter-select">
           <option value="">全部类型</option>
@@ -31,6 +64,27 @@
       </div>
     </div>
 
+    <div v-if="importResult" class="import-panel">
+      <div class="import-panel-head">
+        <strong>导入结果</strong>
+        <button class="btn btn-sm" @click="importResult = null">关闭</button>
+      </div>
+      <p class="import-summary">
+        共 {{ importResult.total }} 条，成功创建 <b class="ok">{{ importResult.created }}</b> 条，
+        失败 <b :class="importResult.failed ? 'fail' : ''">{{ importResult.failed }}</b> 条
+        <span v-if="importResult.batch" class="import-batch">批次：{{ importResult.batch }}</span>
+      </p>
+      <div v-if="importErrors.length" class="import-errors">
+        <div class="import-errors-title">失败明细</div>
+        <ul>
+          <li v-for="(err, i) in importErrors" :key="i">
+            <span class="err-row">第 {{ err.row }} 行</span>{{ err.message }}
+          </li>
+        </ul>
+      </div>
+      <p v-else class="import-all-ok">全部数据导入成功。</p>
+    </div>
+
     <div class="card table-card">
       <div v-if="loading" class="loading-state">加载中...</div>
       <div v-else-if="filteredTasks.length === 0" class="empty-state">
@@ -47,6 +101,8 @@
               <th>优先级</th>
               <th>状态</th>
               <th>发起人</th>
+              <th>项目号(WBS)</th>
+              <th>车号</th>
               <th>主管</th>
               <th>进度</th>
               <th>截止日期</th>
@@ -74,6 +130,14 @@
                 </span>
               </td>
               <td>{{ task.publisher?.name }}</td>
+              <td class="cell-wbs">
+                <span v-if="task.wbsProjectNames?.length" class="wbs-tag">{{ task.wbsProjectNames.join('、') }}</span>
+                <span v-else class="cell-empty">-</span>
+              </td>
+              <td class="cell-wbs">
+                <span v-if="task.wbsCarNames?.length" class="wbs-tag wbs-tag-car">{{ task.wbsCarNames.join('、') }}</span>
+                <span v-else class="cell-empty">-</span>
+              </td>
               <td>{{ task.supervisor?.name }}</td>
               <td>
                 <div class="cell-progress">
@@ -100,12 +164,12 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { taskAPI } from '../../api/index.js'
-import { taskTypeMap, authStore } from '../../store/auth.js'
+import { taskAPI, userAPI, taskImportAPI, wbsAPI } from '../../api/index.js'
+import { taskTypeMap, authStore, canImportTasks } from '../../store/auth.js'
 
 const canEdit = computed(() => {
   const role = authStore.user?.role
-  return ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'].includes(role)
+  return ['admin', 'leader', 'supervisor'].includes(role)
 })
 const canDelete = canEdit
 
@@ -129,15 +193,68 @@ const statusMap = {
 const tasks = ref([])
 const loading = ref(true)
 const searchText = ref('')
+const publisherSearch = ref('')
+const filterPublisherId = ref('')
 const filterStatus = ref('')
 const filterPriority = ref('')
 const filterType = ref('')
+
+// 项目号(WBS) / 车号 搜索与下拉筛选
+const wbsProjectSearch = ref('')
+const wbsCarSearch = ref('')
+const filterWbsProjectId = ref('')
+const filterWbsCarId = ref('')
+
+// 发起人下拉（精确过滤 publisher_id）
+const users = ref([])
+
+// WBS 字典（来自「WBS字典维护」维护的项目WBS -> 车号层级）
+const wbsProjects = ref([])
+const wbsCars = ref([])
+
+// 任务导入（下载模板 / 导入 Excel）
+const fileInputRef = ref(null)
+const downloading = ref(false)
+const importing = ref(false)
+const importResult = ref(null)
+
+const importErrors = computed(() => {
+  const errors = importResult.value?.errors || []
+  // 未使用 dryRun 时，errors 中只有真正的失败行
+  return errors.filter(e => !String(e.message || '').startsWith('（校验通过'))
+})
 
 const filteredTasks = computed(() => {
   let result = tasks.value
   if (searchText.value) {
     const kw = searchText.value.toLowerCase()
     result = result.filter(t => t.title?.toLowerCase().includes(kw))
+  }
+  if (publisherSearch.value) {
+    const kw = publisherSearch.value.toLowerCase()
+    result = result.filter(t =>
+      t.publisher?.name?.toLowerCase().includes(kw) ||
+      t.publisher?.username?.toLowerCase().includes(kw)
+    )
+  }
+  if (filterPublisherId.value) {
+    result = result.filter(t => Number(t.publisher?.id) === Number(filterPublisherId.value))
+  }
+  if (wbsProjectSearch.value) {
+    const kw = wbsProjectSearch.value.toLowerCase()
+    result = result.filter(t => (t.wbsProjectNames || []).some(n => String(n).toLowerCase().includes(kw)))
+  }
+  if (filterWbsProjectId.value) {
+    const pid = Number(filterWbsProjectId.value)
+    result = result.filter(t => (t.wbsProjects || []).some(p => Number(p.id) === pid))
+  }
+  if (wbsCarSearch.value) {
+    const kw = wbsCarSearch.value.toLowerCase()
+    result = result.filter(t => (t.wbsCarNames || []).some(n => String(n).toLowerCase().includes(kw)))
+  }
+  if (filterWbsCarId.value) {
+    const cid = Number(filterWbsCarId.value)
+    result = result.filter(t => (t.wbsCars || []).some(c => Number(c.id) === cid))
   }
   if (filterStatus.value) result = result.filter(t => t.status === filterStatus.value)
   if (filterPriority.value) result = result.filter(t => t.priority === filterPriority.value)
@@ -157,8 +274,86 @@ async function loadTasks() {
   }
 }
 
+async function loadUsers() {
+  try {
+    const data = await userAPI.list()
+    users.value = data.users || []
+  } catch (e) {
+    console.error('Failed to load users:', e)
+  }
+}
+
+// 加载 WBS 字典（项目WBS -> 车号），用于筛选下拉
+async function loadWbs() {
+  try {
+    const data = await wbsAPI.tree()
+    const projects = []
+    const cars = []
+    for (const p of (data.tree || [])) {
+      projects.push({ id: p.id, name: p.name || p.code })
+      for (const c of (p.children || [])) {
+        cars.push({ id: c.id, name: c.name || c.code, projectName: p.name || p.code })
+      }
+    }
+    wbsProjects.value = projects
+    wbsCars.value = cars
+  } catch (e) {
+    console.error('Failed to load WBS dictionary:', e)
+  }
+}
+
+// 下载导入模板（xlsx，含「任务导入」与「填写说明」两个 sheet）
+async function downloadTemplate() {
+  downloading.value = true
+  try {
+    const blob = await taskImportAPI.downloadTemplate()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'task-import-template.xlsx'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    alert(e.message || '模板下载失败')
+  } finally {
+    downloading.value = false
+  }
+}
+
+function triggerImport() {
+  fileInputRef.value?.click()
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function handleImportFile(event) {
+  const file = event.target.files?.[0]
+  // 允许重复选择同一个文件
+  event.target.value = ''
+  if (!file) return
+  importing.value = true
+  importResult.value = null
+  try {
+    const base64 = await readFileAsBase64(file)
+    const result = await taskImportAPI.import(base64)
+    importResult.value = result
+    await loadTasks()
+  } catch (e) {
+    alert(e.message || '导入失败')
+  } finally {
+    importing.value = false
+  }
+}
+
 function exportExcel() {
-  const headers = ['ID', '任务标题', '类型', '优先级', '状态', '发起人', '主管', '进度', '截止日期', '实际完成日期']
+  const headers = ['ID', '任务标题', '类型', '优先级', '状态', '发起人', '项目号(WBS)', '车号', '主管', '进度', '截止日期', '实际完成日期']
   const rows = filteredTasks.value.map(t => [
     t.id,
     t.title,
@@ -166,6 +361,8 @@ function exportExcel() {
     priorityMap[t.priority]?.label,
     statusMap[t.status]?.label,
     t.publisher?.name || '',
+    (t.wbsProjectNames || []).join('、'),
+    (t.wbsCarNames || []).join('、'),
     t.supervisor?.name || '',
     t.progress + '%',
     t.deadline || '',
@@ -194,7 +391,11 @@ async function handleDelete(taskId) {
     alert(e.message || '删除失败')
   }
 }
-onMounted(loadTasks)
+onMounted(() => {
+  loadTasks()
+  loadUsers()
+  loadWbs()
+})
 </script>
 
 <style scoped>
@@ -207,7 +408,7 @@ onMounted(loadTasks)
 .search-box {
   display: flex; align-items: center; gap: 8px;
   background: #fff; border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 12px; flex: 1; max-width: 360px;
+  padding: 8px 12px; flex: 0 1 210px; min-width: 170px; max-width: 360px;
 }
 .search-box svg { color: var(--text-secondary); flex-shrink: 0; }
 .search-input { border: none; outline: none; font-size: 14px; color: var(--text); background: transparent; width: 100%; }
@@ -232,6 +433,14 @@ onMounted(loadTasks)
 .data-table tbody tr:hover { background: #fafbfc; }
 .cell-id { color: var(--text-secondary); font-family: monospace; }
 .cell-title { font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-empty { color: var(--text-caption); }
+.cell-wbs { max-width: 180px; }
+.wbs-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 12px; font-weight: 500; color: var(--primary); background: var(--primary-light, #e6f4ff);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; vertical-align: middle;
+}
+.wbs-tag-car { color: #52c41a; background: #f6ffed; }
 
 .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
 .cell-progress { display: flex; align-items: center; gap: 8px; }
@@ -264,6 +473,33 @@ onMounted(loadTasks)
   transition: all 0.2s; white-space: nowrap;
 }
 .btn-export:hover { background: #52c41a; color: #fff; }
+
+.btn-template {
+  padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  cursor: pointer; border: 1px solid var(--primary); background: #e6f4ff; color: var(--primary);
+  transition: all 0.2s; white-space: nowrap;
+}
+.btn-template:hover { background: var(--primary); color: #fff; }
+.btn-template:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-template:disabled:hover { background: #e6f4ff; color: var(--primary); }
+.file-input { display: none; }
+
+.import-panel {
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.import-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.import-panel-head strong { font-size: 14px; color: var(--text); }
+.import-summary { margin: 0; font-size: 13px; color: var(--text); }
+.import-summary .ok { color: #52c41a; }
+.import-summary .fail { color: #ff4d4f; }
+.import-batch { margin-left: 12px; font-size: 12px; color: var(--text-secondary); }
+.import-errors { margin-top: 12px; }
+.import-errors-title { font-size: 13px; font-weight: 500; color: #ff4d4f; margin-bottom: 6px; }
+.import-errors ul { margin: 0; padding-left: 18px; max-height: 240px; overflow-y: auto; }
+.import-errors li { font-size: 12px; color: var(--text); line-height: 1.8; }
+.import-errors .err-row { color: #ff4d4f; margin-right: 8px; white-space: nowrap; }
+.import-all-ok { margin: 12px 0 0; font-size: 13px; color: #52c41a; }
 </style>
 
 

@@ -245,7 +245,7 @@ const router = useRouter()
 const task = computed(() => store.tasks.find(t => t.id === Number(route.params.id)))
 const canDistribute = computed(() => {
   const role = authStore.user?.role
-  return role === 'admin' || role === 'supervisor_tech' || role === 'supervisor_quality' || 
+  return role === 'admin' || role === 'supervisor' || 
     (role && task.value?.supervisor_id === authStore.user?.id)
 })
 const priority = computed(() => priorityMap[task.value?.priority] || {})

@@ -125,11 +125,11 @@ const isQualityType = computed(() => task.value?.task_type === 'quality_analysis
 
 const availableStaff = computed(() => {
   if (isQualityType.value) {
-    // 质量问题分析：质量主管和质量员都可以被分配（主管可自分配）
-    return allUsers.value.filter(u => (u.role === 'staff_quality' || u.role === 'supervisor_quality') && u.active)
+    // 质量问题分析：质量员和主管都可以被分配（主管可自分配）
+    return allUsers.value.filter(u => (u.role === 'staff_quality' || u.role === 'supervisor') && u.active)
   } else {
-    // 自主修/问题整改：技术主管和技术员都可以被分配（主管可自分配）
-    return allUsers.value.filter(u => (u.role === 'staff_tech' || u.role === 'supervisor_tech') && u.active)
+    // 自主修/问题整改：技术员和主管都可以被分配（主管可自分配）
+    return allUsers.value.filter(u => (u.role === 'staff_tech' || u.role === 'supervisor') && u.active)
   }
 })
 

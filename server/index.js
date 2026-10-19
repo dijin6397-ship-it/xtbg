@@ -11,6 +11,8 @@ import notificationRoutes from './routes/notifications.js'
 import departmentRoutes from './routes/departments.js'
 import moduleRoutes from './routes/modules.js'
 import dictionaryRoutes from './routes/dictionary.js'
+import wbsRoutes from './routes/wbs.js'
+import taskImportRoutes from './routes/task-import.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -19,7 +21,7 @@ const app = express()
 const PORT = process.env.PORT || 3001
 
 app.use(cors())
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '30mb' }))
 
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
@@ -29,6 +31,8 @@ app.use('/api/notifications', notificationRoutes)
 app.use('/api/departments', departmentRoutes)
 app.use('/api/modules', moduleRoutes)
 app.use('/api/dictionary', dictionaryRoutes)
+app.use('/api/wbs', wbsRoutes)
+app.use('/api/task-import', taskImportRoutes)
 
 app.get('/api/health', (req, res) => {
   // 本地 SQLite 模式下每次健康检查自动落盘，防止进程被强杀导致数据丢失

@@ -11,23 +11,47 @@ export const isLoggedIn = computed(() => !!authStore.token)
 export const currentUser = computed(() => authStore.user)
 export const isAdmin = computed(() => authStore.user?.role === 'admin')
 export const isLeader = computed(() => authStore.user?.role === 'leader')
-export const isSupervisor = computed(() => ['supervisor_tech', 'supervisor_quality'].includes(authStore.user?.role))
-export const isSupervisorTech = computed(() => authStore.user?.role === 'supervisor_tech')
-export const isSupervisorQuality = computed(() => authStore.user?.role === 'supervisor_quality')
+export const isSupervisor = computed(() => authStore.user?.role === 'supervisor')
+// @deprecated 角色已合并为 supervisor，以下两个导出仅为兼容旧引用保留
+export const isSupervisorTech = computed(() => authStore.user?.role === 'supervisor')
+export const isSupervisorQuality = computed(() => authStore.user?.role === 'supervisor')
 export const isStaff = computed(() => ['staff_tech', 'staff_quality'].includes(authStore.user?.role))
 export const isStaffTech = computed(() => authStore.user?.role === 'staff_tech')
 export const isStaffQuality = computed(() => authStore.user?.role === 'staff_quality')
 
 export const canApproveFinal = computed(() => authStore.user?.role === 'leader' || authStore.user?.role === 'admin')
-export const canReviewOutput = computed(() => ['supervisor_tech', 'supervisor_quality', 'admin'].includes(authStore.user?.role))
+export const canReviewOutput = computed(() => ['supervisor', 'admin'].includes(authStore.user?.role))
 export const canSubmitOutput = computed(() => ['staff_tech', 'staff_quality'].includes(authStore.user?.role))
 // Task creation permissions by role
-export const canCreateProjectTask = computed(() => ['leader', 'supervisor_tech', 'supervisor_quality', 'admin'].includes(authStore.user?.role))
+export const canCreateProjectTask = computed(() => ['leader', 'supervisor', 'admin'].includes(authStore.user?.role))
 export const canCreateKeyWorkTask = computed(() => ['leader', 'admin'].includes(authStore.user?.role))
-export const canCreateDailyManagementTask = computed(() => ['staff_tech', 'staff_quality', 'supervisor_tech', 'supervisor_quality', 'leader', 'admin'].includes(authStore.user?.role))
+export const canCreateDailyManagementTask = computed(() => ['staff_tech', 'staff_quality', 'supervisor', 'leader', 'admin'].includes(authStore.user?.role))
 
 export const canCreateTask = computed(() => canCreateProjectTask.value || canCreateKeyWorkTask.value || canCreateDailyManagementTask.value)
 export const canCreateDailyTask = computed(() => true)
+
+// 细粒度功能权限（由管理员在账号管理中配置，users.permissions）
+export const userPermissions = computed(() => {
+  const u = authStore.user
+  if (!u) return []
+  if (u.role === 'admin') return ['task_import']
+  return Array.isArray(u.permissions) ? u.permissions : []
+})
+
+// 任务导入（下载模板 / Excel 导入发布任务）——独立权限
+export const canImportTasks = computed(() => userPermissions.value.includes('task_import'))
+
+// 后台管理（admin_backend 模块）访问权限：管理员默认拥有，其他用户需被授予该模块
+export const canAccessBackend = computed(() => {
+  const u = authStore.user
+  if (!u) return false
+  if (u.role === 'admin') return true
+  return (u.modules || []).some(m => m.moduleKey === 'admin_backend')
+})
+
+export function hasPermission(key) {
+  return userPermissions.value.includes(key)
+}
 
 export async function login(username, password) {
   authStore.loading = true
@@ -66,8 +90,7 @@ export async function checkAuth() {
 export const roleMap = {
   admin: '管理员',
   leader: '领导',
-  supervisor_tech: '技术主管',
-  supervisor_quality: '质量主管',
+  supervisor: '主管',
   staff_tech: '技术员',
   staff_quality: '质量员',
   user: '普通用户'

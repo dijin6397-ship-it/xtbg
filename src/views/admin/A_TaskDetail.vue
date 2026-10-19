@@ -33,25 +33,66 @@
       </div>
 
       <!-- Subtasks -->
-      <div class="section" v-if="task.subtasks?.length">
-        <h3>子任务 ({{ task.subtasks.length }})</h3>
+      <div class="section" v-if="task.subtasks?.length || canEditSubtasks">
+        <div class="section-header">
+          <h3>子任务 ({{ task.subtasks?.length || 0 }})</h3>
+          <button v-if="canEditSubtasks && !showAddSubtask" class="btn btn-sm btn-primary" @click="openAddSubtask">
+            + {{ isProjectTask && canAssign ? '分配子任务' : '新增子任务' }}
+          </button>
+        </div>
         <div class="subtask-list">
           <div v-for="sub in task.subtasks" :key="sub.id" class="subtask-item">
-            <div class="subtask-info">
-              <span class="subtask-title">{{ sub.title }}</span>
-              <span class="subtask-assignee">{{ sub.assignee?.name || '未分配' }}</span>
-            </div>
-            <div class="subtask-right">
-              <span class="tag tag-sm" :style="{ color: statusMap[sub.status]?.color, background: statusMap[sub.status]?.bg }">{{ statusMap[sub.status]?.label }}</span>
-              <div class="progress-bar" style="width:80px;height:4px">
-                <div class="progress-bar-fill" :style="{ width: sub.progress + '%', background: 'var(--primary)' }"></div>
+            <!-- 发起人编辑子任务：标题 / 执行人 / 完成时间 -->
+            <div v-if="editingSubtaskId === sub.id" class="subtask-edit-form">
+              <input v-model="subtaskEditForm.title" class="form-textarea" style="min-height:auto" placeholder="子任务标题" />
+              <select v-model="subtaskEditForm.assignee_id" class="form-select">
+                <option value="">未分配</option>
+                <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
+              </select>
+              <input v-model="subtaskEditForm.deadline" type="date" class="form-textarea" style="min-height:auto" />
+              <div class="action-row">
+                <button class="btn btn-primary btn-sm" @click="saveSubtaskEdit(sub.id)">保存</button>
+                <button class="btn btn-sm" @click="cancelEditSubtask">取消</button>
               </div>
-              <span class="progress-text">{{ sub.progress }}%</span>
-              <span v-if="sub.deadline" class="subtask-deadline" :class="{ 'text-danger': new Date(sub.deadline) < new Date() && sub.status !== 'completed' }">{{ sub.deadline }}</span>
-              <button v-if="canSupervise && (isOverdue || task.status === 'overdue') && sub.status !== 'completed'" class="btn btn-sm btn-urge" @click="handleSubtaskUrge(sub.id)" title="催办">📢</button>
+            </div>
+            <template v-else>
+              <div class="subtask-info">
+                <span class="subtask-title">{{ sub.title }}</span>
+                <span class="subtask-assignee">{{ sub.assignee?.name || '未分配' }}</span>
+              </div>
+              <div class="subtask-right">
+                <span class="tag tag-sm" :style="{ color: statusMap[sub.status]?.color, background: statusMap[sub.status]?.bg }">{{ statusMap[sub.status]?.label }}</span>
+                <div class="progress-bar" style="width:80px;height:4px">
+                  <div class="progress-bar-fill" :style="{ width: sub.progress + '%', background: 'var(--primary)' }"></div>
+                </div>
+                <span class="progress-text">{{ sub.progress }}%</span>
+                <span v-if="sub.deadline" class="subtask-deadline" :class="{ 'text-danger': new Date(sub.deadline) < new Date() && sub.status !== 'completed' }">{{ sub.deadline }}</span>
+                <button v-if="canUrgeSubtask && (isOverdue || task.status === 'overdue') && sub.status !== 'completed'" class="btn btn-sm btn-urge" @click="handleSubtaskUrge(sub.id)" title="催办">📢</button>
+                <template v-if="canEditSubtasks">
+                  <button class="btn btn-sm" @click="startEditSubtask(sub)">编辑</button>
+                  <button class="btn btn-sm btn-danger" @click="handleDeleteSubtask(sub)">删除</button>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <!-- 新增子任务 -->
+          <div v-if="showAddSubtask" class="subtask-item subtask-add-row">
+            <div class="subtask-edit-form">
+              <input v-model="newSubtask.title" class="form-textarea" style="min-height:auto" placeholder="子任务标题（必填）" />
+              <select v-model="newSubtask.assignee_id" class="form-select">
+                <option value="">未分配</option>
+                <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
+              </select>
+              <input v-model="newSubtask.deadline" type="date" class="form-textarea" style="min-height:auto" />
+              <div class="action-row">
+                <button class="btn btn-primary btn-sm" @click="submitAddSubtask">添加</button>
+                <button class="btn btn-sm" @click="cancelAddSubtask">取消</button>
+              </div>
             </div>
           </div>
         </div>
+        <div v-if="!task.subtasks?.length && !showAddSubtask" class="empty-hint">暂无子任务</div>
       </div>
 
       <!-- Outputs -->
@@ -82,7 +123,7 @@
             <div v-if="out.scoreTotal !== undefined && out.scoreTotal !== null && out.scoreTotal > 0" class="output-score">
               <span class="score-label">分值：</span>
               <span class="score-text">{{ out.scoreValue }} × {{ out.scoreQuantity }} = <strong>{{ out.scoreTotal }}</strong></span>
-              <span class="output-rule" v-if="out.scoreRule">({{ ruleLabel(out.scoreRule) }})</span><span v-if="out.status === 'pending' && out.submitScore" class="self-score-tag">提交人填报·待主管确认</span><span v-else-if="out.status !== 'pending'" class="self-score-tag">主管核定</span>
+              <span class="output-rule" v-if="out.scoreRule">({{ ruleLabel(out.scoreRule) }})</span><span v-if="out.status === 'pending' && out.submitScore" class="self-score-tag">提交人填报·待{{ isProjectTask ? '发起人' : '主管' }}确认</span><span v-else-if="out.status !== 'pending'" class="self-score-tag">{{ isProjectTask ? '发起人' : '主管' }}核定</span>
             </div>
             <div v-if="out.reviewComment" class="output-review">
               审核意见: {{ out.reviewComment }}
@@ -119,7 +160,8 @@
           <div class="info-row"><span class="info-label">任务类型</span><span>{{ taskTypeMap[task.task_type]?.label }}</span></div>
           <div class="info-row"><span class="info-label">发起人</span><span>{{ task.publisher?.name }}</span></div>
           <div v-if="task.task_type === 'key_work'" class="info-row"><span class="info-label">执行人</span><span>{{ task.direct_assignee?.name || task.assignees?.map(a => a.name).join(', ') || '待指派' }}</span></div>
-          <div v-else class="info-row"><span class="info-label">主管</span><span>{{ task.supervisor?.name }}</span></div>
+          <!-- 项目任务由发起人本人审核，这里展示为「审核人」 -->
+          <div v-else class="info-row"><span class="info-label">{{ isProjectTask ? '审核人' : '主管' }}</span><span>{{ task.supervisor?.name }}</span></div>
           <div v-if="task.task_type !== 'key_work' && task.task_type !== 'daily_management'" class="info-row"><span class="info-label">责任人</span><span>{{ task.assignees?.map(a => a.name).join(', ') || '待分配' }}</span></div>
           <div v-if="task.task_type === 'daily_management' && task.management_category" class="info-row"><span class="info-label">管理类别</span><span>{{ task.management_category }}{{ task.management_detail ? ': ' + task.management_detail : '' }}</span></div>
           <div class="info-row"><span class="info-label">截止日期</span><span :class="{ 'text-danger': isOverdue }">{{ task.deadline || '未设置' }}</span></div>
@@ -131,14 +173,40 @@
       <!-- Action Card -->
       <div class="card action-card">
         <h3>操作</h3>
+
+        <!-- 项目任务：分解中提示（仅发起人/管理员可见，谁发起谁分配） -->
+        <div v-if="isProjectTask && task.status === 'decomposing' && canAssign" class="decomposing-hint">
+          该任务正在分解中：请先分配子任务并指定执行人，完成后点击「完成分配，开始执行」。
+        </div>
+
         <div class="action-buttons">
-          <!-- Leader: distribute task to supervisor -->
-          <router-link v-if="task.status === 'pending' && canDistribute" :to="`/admin/task/${task.id}/decompose`" class="btn btn-primary btn-block">
+          <!-- 项目任务：发起人本人分配子任务（谁发起谁分配）——直接在详情页内联分配 -->
+          <button v-if="isProjectTask && canAssign && canEditSubtasks && !showAddSubtask" class="btn btn-primary btn-block" @click="openAddSubtask">
+            分配子任务
+          </button>
+          <!-- 项目任务：也可进入分解页批量分配 -->
+          <router-link v-if="isProjectTask && canAssign && canEditSubtasks && (task.status === 'decomposing' || task.status === 'pending')" :to="`/admin/task/${task.id}/decompose`" class="btn btn-block">
+            进入分解页批量分配
+          </router-link>
+          <div v-if="isProjectTask && canAssign && !canEditSubtasks" class="action-hint">
+            {{ editPermissionError || '当前不可分配子任务' }}
+          </div>
+
+          <!-- 项目任务：子任务分配完成后，由发起人确认进入执行阶段 -->
+          <button v-if="canStartExecution" class="btn btn-primary btn-block" :disabled="!task.subtasks?.length" @click="handleStartExecution">
+            完成分配，开始执行
+          </button>
+          <div v-if="canStartExecution && !task.subtasks?.length" class="action-hint">
+            请先在下方「子任务」中添加子任务并指定执行人
+          </div>
+
+          <!-- Leader: distribute task to supervisor（仅非项目任务，项目任务由发起人直接分配） -->
+          <router-link v-if="!isProjectTask && task.status === 'pending' && canDistribute" :to="`/admin/task/${task.id}/decompose`" class="btn btn-primary btn-block">
             分解下发任务
           </router-link>
 
-          <!-- Supervisor: assign subtasks -->
-          <router-link v-if="task.status === 'pending' && canAssign" :to="`/admin/task/${task.id}/decompose`" class="btn btn-primary btn-block">
+          <!-- Supervisor: assign subtasks（非项目任务，沿用主管分配） -->
+          <router-link v-if="!isProjectTask && task.status === 'pending' && canAssign" :to="`/admin/task/${task.id}/decompose`" class="btn btn-primary btn-block">
             分配子任务
           </router-link>
 
@@ -162,8 +230,8 @@
             </div>
           </div>
 
-          <!-- Leader: final approval -->
-          <div v-if="canApprove && (task.status === 'review' || task.task_type === 'key_work')" class="final-actions">
+          <!-- Leader: final approval（仅部门重点工作等非项目任务；项目任务由发起人确认完成） -->
+          <div v-if="!isProjectTask && canApprove && (task.status === 'review' || task.task_type === 'key_work')" class="final-actions">
             <!-- For key_work: show outputs with editable scores -->
             <div v-if="canApprove && task.task_type === 'key_work' && task.outputs?.length" class="key-work-scores">
               <h4 style="font-size:13px; font-weight:600; margin:0 0 12px 0; color:var(--text);">输出物评分（可修改）</h4>
@@ -211,15 +279,29 @@
             </button>
           </div>
 
+          <!-- 项目任务：发起人确认完成（子任务全部完成、输出物全部审核通过后） -->
+          <div v-if="isProjectTask && canCompleteProject" class="project-complete-actions">
+            <button class="btn btn-success btn-block" @click="handleProjectComplete">
+              确认完成任务
+            </button>
+          </div>
+          <div v-else-if="isProjectTask && isTaskPublisher && !['completed', 'cancelled', 'decomposing', 'pending'].includes(task.status)" class="action-hint">
+            子任务全部完成且输出物全部审核通过后，可由发起人确认完成任务
+          </div>
+
           <!-- Completed badge -->
           <div v-if="task.status === 'completed'" class="completed-badge">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#52c41a" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
             任务已完成
+          </div>
 
-          <!-- Edit task -->
-          <button v-if="canEdit && !isEditing && task.status !== 'completed' && task.status !== 'cancelled'" class="btn btn-block" @click="startEdit" style="margin-top: 8px">
+          <!-- Edit task（发起人：子任务填写完成后、截止日期之前可修改） -->
+          <button v-if="canEditTask && !isEditing" class="btn btn-block" @click="startEdit" style="margin-top: 8px">
             编辑任务
           </button>
+          <div v-if="showEditBlockedHint && !isEditing" class="edit-blocked-hint">
+            {{ editPermissionError }}
+          </div>
           <div v-if="isEditing" class="edit-form">
             <div class="form-group">
               <label class="form-label">任务标题</label>
@@ -242,6 +324,10 @@
               <label class="form-label">截止日期</label>
               <input v-model="editForm.deadline" type="date" class="form-textarea" style="min-height:auto" />
             </div>
+            <div class="form-group">
+              <label class="form-label">项目号 / 车号（WBS）</label>
+              <WbsSelector v-model:projectIds="editForm.wbs_project_ids" v-model:carIds="editForm.wbs_car_ids" />
+            </div>
             <div class="action-row">
               <button class="btn btn-primary btn-sm" @click="saveEdit">保存</button>
               <button class="btn btn-sm" @click="cancelEdit">取消</button>
@@ -257,7 +343,6 @@
           <button v-if="canDelete && !isEditing" class="btn btn-danger btn-block" @click="handleDelete" style="margin-top: 8px">
             删除任务
           </button>
-          </div>
         </div>
       </div>
 
@@ -363,7 +448,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { taskAPI } from '../../api/index.js'
+import { taskAPI, userAPI } from '../../api/index.js'
+import WbsSelector from '../../components/WbsSelector.vue'
 import { authStore, taskTypeMap, statusMap, canReviewOutput, canSubmitOutput, canApproveFinal } from '../../store/auth.js'
 
 const route = useRoute()
@@ -398,30 +484,87 @@ const isOverdue = computed(() => {
   return new Date(task.value.deadline) < new Date() && task.value.status !== 'completed'
 })
 
+// ---------------- 角色 / 任务类型判定 ----------------
+// 项目任务：自主修 / 问题整改 / 现场质量问题分析（谁发起谁分配子任务、谁发起谁审核）
+const PROJECT_TASK_TYPES = ['self_repair', 'rectification', 'quality_analysis']
+const isProjectTask = computed(() => PROJECT_TASK_TYPES.includes(task.value?.task_type))
+
+// 当前用户是否为本任务发起人（「谁发起谁分配、谁发起谁审核」的核心判断）
+const isTaskPublisher = computed(() => {
+  const uid = authStore.user?.id
+  if (!task.value || uid === undefined || uid === null) return false
+  return Number(task.value.publisher_id) === Number(uid)
+})
+
+const isAdminUser = computed(() => authStore.user?.role === 'admin')
+
 const canDistribute = computed(() => {
+  // 部门重点工作仍由领导分发；项目任务（自主修/问题整改/现场质量问题分析）
+  // 由发起人本人直接分配子任务，不再经过领导分发。
+  if (isProjectTask.value) return false
   const role = authStore.user?.role
   return role === 'leader' || role === 'admin'
 })
 
+// 谁发起谁分配子任务：项目任务的发起人本人可分配；管理员兜底。
 const canAssign = computed(() => {
-  const role = authStore.user?.role
+  if (!task.value) return false
   const uid = authStore.user?.id
-  return (role === 'supervisor_tech' || role === 'supervisor_quality' || role === 'admin') 
-    && task.value?.supervisor_id === uid
+  if (isProjectTask.value) return isTaskPublisher.value || isAdminUser.value
+  // 非项目任务（部门重点工作等）沿用主管分配
+  const role = authStore.user?.role
+  return ['supervisor', 'admin'].includes(role) && Number(task.value.supervisor_id) === Number(uid)
 })
 
 const canReview = computed(() => {
   if (!task.value) return false
   const uid = authStore.user?.id
+  // 项目任务：谁发起谁审核——发起人本人审核该任务下所有待审输出物；管理员亦可
+  if (isProjectTask.value) return isTaskPublisher.value || isAdminUser.value
   // 常规：本任务的主管（含管理员）审核任务下所有输出物
-  if (canReviewOutput.value && task.value.supervisor_id === uid) return true
+  if ((canReviewOutput.value || ['supervisor', 'admin'].includes(authStore.user?.role)) &&
+      Number(task.value.supervisor_id) === Number(uid)) return true
   // 兜底：提交人可以审核自己提交的输出物。
   // 例如「部门日常管理」任务由发起人本人提交并自评，而发起人可能是领导/普通员工，
   // 不属于主管角色；若不放开这一条，其输出物无人可审，任务会永远卡在"无法完成"。
   return (task.value.outputs || []).some(o => o.status === 'pending' && o.submitter?.id === uid)
 })
 
-const canApprove = computed(() => canApproveFinal.value)
+// 项目任务不再需要领导最终审批，由发起人本人确认完成；其他任务保持原逻辑（领导/管理员）。
+const canApprove = computed(() => {
+  if (!task.value) return false
+  if (isProjectTask.value) return isTaskPublisher.value || isAdminUser.value
+  return canApproveFinal.value
+})
+
+// 项目任务：全部子任务完成、输出物审核通过后，由发起人确认完成
+// 说明：正常情况下最后一个输出物审核通过时后端会自动把任务置为 completed；
+// 这里的按钮用于「子任务未与输出物关联 / 历史数据」等场景兜底，保证发起人始终有完成入口。
+const canCompleteProject = computed(() => {
+  if (!isProjectTask.value || !task.value) return false
+  if (!(isTaskPublisher.value || isAdminUser.value)) return false
+  if (['completed', 'cancelled', 'decomposing', 'pending'].includes(task.value.status)) return false
+  const subs = task.value.subtasks || []
+  const outputs = task.value.outputs || []
+  const noPendingOutput = !outputs.some(o => o.status === 'pending')
+  // 输出物全部审核通过（用于子任务与输出物未关联时的兜底）
+  const outputsAllApproved = outputs.length > 0 && outputs.every(o => o.status === 'approved')
+  // 子任务：有子任务时要求全部完成；无子任务时要求输出物已全部审核通过
+  const subsReady = subs.length > 0
+    ? subs.every(s => s.status === 'completed')
+    : outputsAllApproved
+  return noPendingOutput && (subsReady || outputsAllApproved)
+})
+
+// 项目任务：子任务分配完成后，由发起人确认进入执行阶段（decomposing → in_progress）
+// 说明：项目任务的发起人只可能是 leader / supervisor / admin，后端 PUT /tasks/:id 允许这些角色改状态；
+// 若发起人已过截止日期（后端编辑窗口关闭），则不展示该按钮，避免点击后报错。
+const canStartExecution = computed(() => {
+  if (!isProjectTask.value || !task.value) return false
+  if (!(isTaskPublisher.value || isAdminUser.value)) return false
+  if (isTaskPublisher.value && !isAdminUser.value && !canEditTask.value) return false
+  return task.value.status === 'decomposing' || task.value.status === 'pending'
+})
 
 const canSubmitOutputBtn = computed(() => {
   if (!task.value) return false
@@ -430,7 +573,7 @@ const canSubmitOutputBtn = computed(() => {
   // Staff can always submit outputs
   if (['staff_tech', 'staff_quality'].includes(role)) return true
   // Supervisors can submit outputs for tasks they are assigned as supervisor (quality_analysis/self_repair/rectification)
-  if (['supervisor_tech', 'supervisor_quality'].includes(role) && task.value.supervisor_id === uid) return true
+  if (['supervisor'].includes(role) && Number(task.value.supervisor_id) === Number(uid)) return true
   // Leaders/admin can submit outputs for daily_management tasks
   if (['leader', 'admin'].includes(role) && task.value.task_type === 'daily_management') return true
   return false
@@ -441,27 +584,30 @@ const canSupervise = computed(() => {
   return role === 'leader' || role === 'admin'
 })
 
+// 项目任务：发起人可直接催办自己分配的子任务（不必等领导督办）
+const canUrgeSubtask = computed(() => canSupervise.value || (isProjectTask.value && isTaskPublisher.value))
 
-const canDelete = computed(() => ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'].includes(authStore.user?.role))
+
+const canDelete = computed(() => ['admin', 'leader', 'supervisor'].includes(authStore.user?.role))
 
 const canRecall = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'pending' && task.value.status !== 'decomposing') return false
   const uid = authStore.user?.id
-  return task.value.publisher_id === uid || 
-    task.value.supervisor_id === uid ||
+  return isTaskPublisher.value ||
+    Number(task.value.supervisor_id) === Number(uid) ||
     ['admin', 'leader'].includes(authStore.user?.role)
 })
 
 const canStartTask = computed(() => {
   if (!task.value) return false
   if (task.value.status !== 'pending') return false
-  const uid = authStore.user?.id
+  // 项目任务走「分配子任务 → 完成分配，开始执行」流程，不显示普通「开始任务」按钮
+  if (isProjectTask.value) return false
   // Task creator can start the task if they're not a leader/supervisor who would use decompose/assign
   const role = authStore.user?.role
-  const isPublisher = task.value.publisher_id === uid
-  const isLeaderOrSupervisor = ['leader', 'supervisor_tech', 'supervisor_quality', 'admin'].includes(role)
-  return isPublisher && !isLeaderOrSupervisor
+  const isLeaderOrSupervisor = ['leader', 'supervisor', 'admin'].includes(role)
+  return isTaskPublisher.value && !isLeaderOrSupervisor
 })
 
 // Recall functions
@@ -498,13 +644,59 @@ async function handleRecallTask() {
 const canRecallComplete = computed(() => {
   if (task.value?.status !== 'review') return false
   const uid = authStore.user?.id
-  return task.value?.publisher_id === uid || 
-    task.value?.assignees?.some(a => a.id === uid) ||
-    task.value?.supervisor_id === uid
+  return isTaskPublisher.value ||
+    task.value?.assignees?.some(a => Number(a.id) === Number(uid)) ||
+    Number(task.value?.supervisor_id) === Number(uid)
 })
 
 const isEditing = ref(false)
 const editForm = ref({})
+
+// 编辑窗口权限（后端 /tasks/:id/edit-permission 返回）
+// 规则：任务发起人在「子任务填写完成后、截止日期之前」可继续修改任务与子任务；
+// 管理员/主管/领导始终可修改。
+const editPermission = ref(null)
+const canEditTask = computed(() => !!editPermission.value?.allowed)
+const canEditSubtasks = computed(() => !!editPermission.value?.canEditSubtasks)
+const editPermissionError = computed(() => {
+  const perm = editPermission.value
+  if (!perm) return ''
+  if (perm.error) return perm.error
+  if (perm.isPastDeadline) return '已超过任务截止日期，发起人不能再修改'
+  return '当前不可修改任务'
+})
+
+// 仅对「任务发起人」展示不可编辑原因，避免向无关角色展示无意义的提示
+const showEditBlockedHint = computed(() => {
+  const perm = editPermission.value
+  return !!perm && !perm.allowed && !!perm.isPublisher
+})
+
+// 子任务编辑（发起人窗口内）
+const users = ref([])
+const editingSubtaskId = ref(null)
+const subtaskEditForm = ref({ title: '', assignee_id: '', deadline: '' })
+const showAddSubtask = ref(false)
+const newSubtask = ref({ title: '', assignee_id: '', deadline: '' })
+
+async function loadEditPermission() {
+  try {
+    editPermission.value = await taskAPI.editPermission(task.value.id)
+  } catch (e) {
+    // 拿不到权限时按「不可编辑」处理，并展示后端返回的原因
+    editPermission.value = { allowed: false, canEditSubtasks: false, error: e.message }
+  }
+}
+
+async function loadUsers() {
+  if (users.value.length) return
+  try {
+    const data = await userAPI.list()
+    users.value = data.users || []
+  } catch (e) {
+    console.error(e)
+  }
+}
 
 function startEdit() {
   editForm.value = {
@@ -512,7 +704,9 @@ function startEdit() {
     description: task.value.description,
     priority: task.value.priority,
     deadline: task.value.deadline || '',
-    supervisor_id: task.value.supervisor_id || null
+    // WBS 用本地数组保存，提交时回传
+    wbs_project_ids: (task.value.wbsProjects || []).map(p => p.id),
+    wbs_car_ids: (task.value.wbsCars || []).map(c => c.id)
   }
   isEditing.value = true
 }
@@ -524,9 +718,101 @@ function cancelEdit() {
 
 async function saveEdit() {
   try {
-    const data = await taskAPI.update(task.value.id, editForm.value)
+    const payload = { ...editForm.value }
+    // 发起人无权改动主管等流程字段，仅提交允许修改的字段
+    delete payload.supervisor_id
+    const data = await taskAPI.update(task.value.id, payload)
     task.value = data.task
     isEditing.value = false
+    await loadEditPermission()
+    alert('任务已保存')
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+// ---------------- 子任务增删改（发起人窗口内） ----------------
+
+function openAddSubtask() {
+  loadUsers()
+  newSubtask.value = { title: '', assignee_id: '', deadline: '' }
+  editingSubtaskId.value = null
+  showAddSubtask.value = true
+}
+
+function cancelAddSubtask() {
+  showAddSubtask.value = false
+  newSubtask.value = { title: '', assignee_id: '', deadline: '' }
+}
+
+async function submitAddSubtask() {
+  const title = (newSubtask.value.title || '').trim()
+  if (!title) {
+    alert('请输入子任务标题')
+    return
+  }
+  try {
+    const data = await taskAPI.addSubtasks(task.value.id, [{
+      title,
+      assignee_id: newSubtask.value.assignee_id || null,
+      deadline: newSubtask.value.deadline || ''
+    }])
+    task.value = data.task
+    showAddSubtask.value = false
+    newSubtask.value = { title: '', assignee_id: '', deadline: '' }
+    await loadEditPermission()
+    alert('子任务已新增')
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+function startEditSubtask(sub) {
+  loadUsers()
+  showAddSubtask.value = false
+  editingSubtaskId.value = sub.id
+  subtaskEditForm.value = {
+    title: sub.title || '',
+    assignee_id: sub.assignee?.id || '',
+    deadline: sub.deadline || ''
+  }
+}
+
+function cancelEditSubtask() {
+  editingSubtaskId.value = null
+  subtaskEditForm.value = { title: '', assignee_id: '', deadline: '' }
+}
+
+async function saveSubtaskEdit(subId) {
+  const title = (subtaskEditForm.value.title || '').trim()
+  if (!title) {
+    alert('请输入子任务标题')
+    return
+  }
+  try {
+    const data = await taskAPI.updateSubtask(task.value.id, subId, {
+      title,
+      assignee_id: subtaskEditForm.value.assignee_id || null,
+      deadline: subtaskEditForm.value.deadline || ''
+    })
+    task.value = data.task
+    editingSubtaskId.value = null
+    subtaskEditForm.value = { title: '', assignee_id: '', deadline: '' }
+    await loadEditPermission()
+    alert('子任务已保存')
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+async function handleDeleteSubtask(sub) {
+  if (!confirm(`确定要删除子任务「${sub.title}」吗？此操作不可恢复。`)) return
+  try {
+    const data = await taskAPI.removeSubtask(task.value.id, sub.id)
+    task.value = data.task
+    if (editingSubtaskId.value === sub.id) cancelEditSubtask()
+    await loadEditPermission()
+    alert('子任务已删除')
   } catch (e) {
     alert(e.message)
   }
@@ -567,6 +853,8 @@ async function loadTask() {
   try {
     const data = await taskAPI.get(Number(route.params.id))
     task.value = data.task
+    // 加载编辑窗口权限（发起人在截止日期前可继续修改任务/子任务）
+    if (task.value) await loadEditPermission()
     // Initialize leaderScores for key_work final approval
     // 显示员工自评的分值，如果没有则显示参考分值供领导修改
     if (task.value?.task_type === 'key_work' && task.value?.outputs?.length) {
@@ -775,6 +1063,53 @@ async function handleStartTask() {
   }
 }
 
+// 项目任务：发起人完成子任务分配后，确认进入执行阶段（分解中 → 进行中）
+async function handleStartExecution() {
+  if (!task.value?.subtasks?.length) {
+    alert('请先分配至少一个子任务并指定执行人')
+    return
+  }
+  const unassigned = task.value.subtasks.filter(s => !s.assignee?.id)
+  if (unassigned.length > 0) {
+    if (!confirm(`还有 ${unassigned.length} 个子任务未指定执行人，确定要开始执行吗？`)) return
+  } else if (!confirm('子任务分配完成后，任务将进入执行阶段，确定继续吗？')) {
+    return
+  }
+  try {
+    const data = await taskAPI.update(task.value.id, { status: 'in_progress' })
+    task.value = data.task
+    await loadEditPermission()
+    if (task.value.status === 'decomposing' || task.value.status === 'pending') {
+      // 后端对「发起人非主管/领导/管理员」的历史任务会忽略状态字段，这里给出明确提示
+      alert('任务状态未能更新，请确认当前账号为该任务发起人且具备主管/领导权限')
+      return
+    }
+    alert('任务已进入执行阶段')
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
+// 项目任务：发起人确认完成（子任务全部完成 + 输出物全部审核通过）
+async function handleProjectComplete() {
+  if (!canCompleteProject.value) {
+    alert('子任务尚未全部完成或仍有待审核的输出物，暂不能确认完成')
+    return
+  }
+  if (!confirm('子任务已全部完成、输出物已全部审核通过，确认将此任务标记为完成？')) return
+  try {
+    const data = await taskAPI.approveFinal(task.value.id, {
+      approved: true,
+      comment: '项目任务完成（发起人确认）'
+    })
+    task.value = data.task
+    await loadEditPermission()
+    alert('任务已完成')
+  } catch (e) {
+    alert(e.message)
+  }
+}
+
 onMounted(loadTask)
 </script>
 
@@ -811,6 +1146,18 @@ onMounted(loadTask)
 .subtask-title { font-size: 13px; color: var(--text); font-weight: 500; }
 .subtask-assignee { font-size: 12px; color: var(--text-secondary); }
 .subtask-right { display: flex; align-items: center; gap: 8px; }
+
+/* 发起人编辑子任务 */
+.section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.section-header h3 { margin: 0; }
+.subtask-edit-form { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.subtask-add-row { align-items: stretch; }
+.edit-blocked-hint { margin-top: 8px; padding: 8px 12px; background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px; font-size: 12px; color: #fa8c16; }
+
+/* 项目任务：分解中提示 / 操作提示 / 完成确认 */
+.decomposing-hint { margin-bottom: 12px; padding: 10px 12px; background: #f9f0ff; border: 1px solid #d3adf7; border-radius: 8px; font-size: 12px; color: #722ed1; line-height: 1.6; }
+.action-hint { font-size: 12px; color: var(--text-caption); line-height: 1.6; }
+.project-complete-actions { margin-top: 4px; }
 
 .output-list { display: flex; flex-direction: column; gap: 10px; }
 .output-item { padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); }

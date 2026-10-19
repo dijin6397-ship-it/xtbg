@@ -66,8 +66,8 @@
         </select>
       </div>
 
-      <!-- Title (project and key_work) -->
-      <div v-if="form.flow_type && form.flow_type !== 'daily_management'" class="form-group">
+      <!-- Title (all flows, incl. daily_management) -->
+      <div v-if="form.flow_type" class="form-group">
         <label class="form-label">任务标题 *</label>
         <input class="form-input" v-model="form.title" placeholder="请输入任务标题" />
       </div>
@@ -88,6 +88,12 @@
       <div v-if="form.flow_type === 'daily_management'" class="form-group">
         <label class="form-label">截止日期 <span class="required">*</span></label>
         <input class="form-input" type="date" v-model="form.deadline" />
+      </div>
+
+      <!-- WBS: 项目号（可多选）/ 车号（可多选） -->
+      <div v-if="form.flow_type" class="form-group">
+        <label class="form-label">项目号（WBS元素）/ 车号</label>
+        <WbsSelector v-model:projectIds="form.wbs_project_ids" v-model:carIds="form.wbs_car_ids" />
       </div>
 
       <!-- Submit -->
@@ -121,6 +127,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { taskAPI, userAPI } from '../../api/index.js'
 import { authStore, canCreateProjectTask, canCreateKeyWorkTask, canCreateDailyManagementTask } from '../../store/auth.js'
+import WbsSelector from '../../components/WbsSelector.vue'
 
 const router = useRouter()
 const publishing = ref(false)
@@ -132,9 +139,9 @@ const techQualityUsers = computed(() => {
 })
 
 const allFlowTypes = [
-  { value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析', color: '#1677ff', roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality'] },
+  { value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析', color: '#1677ff', roles: ['admin', 'leader', 'supervisor'] },
   { value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人', color: '#13c2c2', roles: ['admin', 'leader'] },
-  { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理', color: '#faad14', roles: ['admin', 'leader', 'supervisor_tech', 'supervisor_quality', 'staff_tech', 'staff_quality'] }
+  { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理', color: '#faad14', roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality'] }
 ]
 const flowTypes = computed(() => {
   const role = authStore.user?.role
@@ -152,7 +159,9 @@ const form = reactive({
   deadline: '',
   assignee_id: null,
   management_category: '',
-  management_detail: ''
+  management_detail: '',
+  wbs_project_ids: [],
+  wbs_car_ids: []
 })
 
 function selectFlow(value) {
@@ -170,6 +179,8 @@ function selectFlow(value) {
   form.title = ''
   form.description = ''
   form.deadline = ''
+  form.wbs_project_ids = []
+  form.wbs_car_ids = []
 }
 
 const isValid = computed(() => {
@@ -179,12 +190,13 @@ const isValid = computed(() => {
     return form.task_type && form.title.trim() && form.description.trim()
   }
   if (form.flow_type === 'key_work') {
-    return form.assignee_id && form.description.trim()
+    return form.assignee_id && form.title.trim() && form.description.trim()
   }
   if (form.flow_type === 'daily_management') {
     if (!form.management_category) return false
     if (form.management_category === '其他' && !form.management_detail.trim()) return false
-    return form.description.trim()
+    // 日常管理任务同样必须有任务标题
+    return form.title.trim() && form.description.trim()
   }
   return false
 })
@@ -195,11 +207,12 @@ async function handlePublish() {
   try {
     const taskData = {
       task_type: form.task_type,
-      title: form.flow_type === 'daily_management'
-        ? form.management_category + '日常管理'
-        : form.title.trim(),
+      // 所有流程（含部门日常管理）都使用用户填写的任务标题
+      title: form.title.trim(),
       description: form.description.trim(),
-      deadline: form.deadline || null
+      deadline: form.deadline || null,
+      wbs_project_ids: form.wbs_project_ids,
+      wbs_car_ids: form.wbs_car_ids
     }
     if (form.flow_type === 'key_work') {
       taskData.assignee_id = form.assignee_id
@@ -220,7 +233,8 @@ async function handlePublish() {
 function resetForm() {
   Object.assign(form, {
     flow_type: '', task_type: '', title: '', description: '', deadline: '',
-    assignee_id: null, management_category: '', management_detail: ''
+    assignee_id: null, management_category: '', management_detail: '',
+    wbs_project_ids: [], wbs_car_ids: []
   })
   showSuccess.value = false
 }

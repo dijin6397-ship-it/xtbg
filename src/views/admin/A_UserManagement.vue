@@ -33,6 +33,7 @@
               <th>角色</th>
               <th>职务</th>
               <th>状态</th>
+              <th>功能权限</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -49,6 +50,12 @@
               <td>
                 <span class="status-dot" :class="{ active: user.active }"></span>
                 {{ user.active ? '启用' : '禁用' }}
+              </td>
+              <td>
+                <template v-if="getUserPermissions(user).length">
+                  <span v-for="p in getUserPermissions(user)" :key="p" class="tag perm-tag">{{ permLabel(p) }}</span>
+                </template>
+                <span v-else class="cell-empty">-</span>
               </td>
               <td>
                 <div class="action-btns">
@@ -93,8 +100,7 @@
           <select v-model="form.role" class="form-select">
             <option value="admin">管理员</option>
             <option value="leader">领导</option>
-            <option value="supervisor_tech">技术主管</option>
-            <option value="supervisor_quality">质量主管</option>
+            <option value="supervisor">主管</option>
             <option value="staff_tech">技术员</option>
             <option value="staff_quality">质量员</option>
           </select>
@@ -111,6 +117,16 @@
               <span>{{ mod.name }}</span>
             </label>
           </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">功能权限</label>
+          <div v-if="allPermissions.length" class="module-check-grid">
+            <label v-for="perm in allPermissions" :key="perm.key" class="module-check">
+              <input type="checkbox" :value="perm.key" v-model="form.permissions" />
+              <span>{{ perm.label }}</span>
+            </label>
+          </div>
+          <div v-else class="perm-empty">暂无可配置的功能权限</div>
         </div>
         <div v-if="formError" class="error-msg">{{ formError }}</div>
         <div class="dialog-actions">
@@ -135,6 +151,7 @@ const editingUser = ref(null)
 const saving = ref(false)
 const formError = ref('')
 const allModules = ref([])
+const allPermissions = ref([])
 
 const form = reactive({
   username: '',
@@ -143,7 +160,8 @@ const form = reactive({
   department: '技术质量部',
   role: 'staff_tech',
   title: '',
-  moduleIds: []
+  moduleIds: [],
+  permissions: []
 })
 
 const filteredUsers = computed(() => {
@@ -164,7 +182,9 @@ watch(showDialog, (v) => {
 
 async function loadUsers() {
   try {
-    const data = await userAPI.list()
+    // 使用 /users/full：该接口返回每个用户的模块分配情况（modules 数组），
+    // 编辑弹窗才能正确回填已勾选的模块；否则会误清空用户已有模块权限。
+    const data = await userAPI.full()
     users.value = data.users
   } catch (e) {
     console.error('Failed to load users:', e)
@@ -180,6 +200,25 @@ async function loadModules() {
   }
 }
 
+async function loadPermissions() {
+  try {
+    const data = await userAPI.permissions()
+    allPermissions.value = data.permissions || []
+  } catch (e) {
+    console.error('Failed to load permissions:', e)
+  }
+}
+
+// 权限 key -> 中文名称（列表接口未返回 label 时回退显示 key）
+function permLabel(key) {
+  const p = allPermissions.value.find(item => item.key === key)
+  return p ? p.label : key
+}
+
+function getUserPermissions(user) {
+  return Array.isArray(user.permissions) ? user.permissions : []
+}
+
 function openCreateDialog() {
   editingUser.value = null
   form.username = ''
@@ -189,6 +228,7 @@ function openCreateDialog() {
   form.role = 'staff_tech'
   form.title = ''
   form.moduleIds = []
+  form.permissions = []
   formError.value = ''
   showDialog.value = true
 }
@@ -202,6 +242,7 @@ function openEditDialog(user) {
   form.role = user.role
   form.title = user.title
   form.moduleIds = (user.modules || []).map(m => m.id)
+  form.permissions = Array.isArray(user.permissions) ? [...user.permissions] : []
   formError.value = ''
   showDialog.value = true
 }
@@ -214,8 +255,9 @@ async function handleSave() {
 
   saving.value = true
   try {
+    const permissions = [...form.permissions]
     if (editingUser.value) {
-      const data = { name: form.name, role: form.role, title: form.title, department: form.department }
+      const data = { name: form.name, role: form.role, title: form.title, department: form.department, permissions }
       if (form.password) data.password = form.password
       await userAPI.update(editingUser.value.id, data)
       await moduleAPI.setUserModules(editingUser.value.id, form.moduleIds)
@@ -228,6 +270,10 @@ async function handleSave() {
         title: form.title,
         department: form.department
       })
+      // 创建接口目前不接收 permissions，创建后补一次 PUT 写入功能权限
+      if (permissions.length) {
+        await userAPI.update(created.user.id, { permissions })
+      }
       await moduleAPI.setUserModules(created.user.id, form.moduleIds)
     }
     showDialog.value = false
@@ -265,6 +311,7 @@ async function confirmHardDelete(user) {
 onMounted(() => {
   loadUsers()
   loadModules()
+  loadPermissions()
 })
 </script>
 
@@ -309,10 +356,11 @@ onMounted(() => {
 .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
 .role-admin { color: #ff4d4f; background: #fff2f0; }
 .role-leader { color: #fa8c16; background: #fff7e6; }
-.role-supervisor_tech { color: #1677ff; background: #e6f4ff; }
-.role-supervisor_quality { color: #722ed1; background: #f9f0ff; }
+.role-supervisor { color: #1677ff; background: #e6f4ff; }
 .role-staff_tech { color: #13c2c2; background: #e6fffb; }
 .role-staff_quality { color: #52c41a; background: #f6ffed; }
+.perm-tag { color: #1677ff; background: #e6f4ff; margin: 2px 4px 2px 0; }
+.cell-empty { color: var(--text-secondary); }
 
 .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ccc; margin-right: 6px; vertical-align: middle; }
 .status-dot.active { background: #52c41a; }
@@ -405,4 +453,5 @@ onMounted(() => {
   font-size: 13px;
   cursor: pointer;
 }
+.perm-empty { font-size: 12px; color: var(--text-secondary); }
 </style>

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getDB } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { requireBackendModule } from '../module-access.js'
 
 const router = Router()
 
@@ -24,12 +25,45 @@ router.get('/my', authMiddleware, (req, res) => {
   res.json({ modules })
 })
 
-router.put('/:userId', authMiddleware, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: '无权限' })
+// PUT /api/modules/:userId - 设置用户模块权限
+// 需要「后台管理」模块权限或管理员（账号管理页保存模块权限时调用）
+router.put('/:userId', authMiddleware, requireBackendModule, (req, res) => {
   const db = getDB()
   const userId = Number(req.params.userId)
   const { moduleIds } = req.body
   if (!Array.isArray(moduleIds)) return res.status(400).json({ error: 'moduleIds must be array' })
+
+  // 目标用户必须存在
+  const uStmt = db.prepare('SELECT id, role FROM users WHERE id = ?')
+  uStmt.bind([userId])
+  const target = uStmt.step() ? uStmt.getAsObject() : null
+  uStmt.free()
+  if (!target) return res.status(404).json({ error: '用户不存在' })
+
+  // 防提权：非管理员不能修改管理员账号的模块权限
+  if (req.user.role !== 'admin' && target.role === 'admin') {
+    return res.status(403).json({ error: '权限不足：不能修改管理员账号的模块权限' })
+  }
+
+  // 防提权：非管理员不能把「后台管理」模块授予他人（避免自我扩散权限）
+  if (req.user.role !== 'admin') {
+    const beStmt = db.prepare("SELECT id FROM modules WHERE module_key = 'admin_backend'")
+    let beId = null
+    if (beStmt.step()) beId = beStmt.getAsObject().id
+    beStmt.free()
+    if (beId && moduleIds.map(Number).includes(Number(beId))) {
+      // 允许保留自己已有的该模块，但不允许新授予他人
+      const ownStmt = db.prepare('SELECT COUNT(*) AS c FROM user_modules WHERE user_id = ? AND module_id = ?')
+      ownStmt.bind([userId, beId])
+      const ownRow = ownStmt.step() ? ownStmt.getAsObject() : null
+      ownStmt.free()
+      const targetAlreadyHas = (ownRow?.c || 0) > 0
+      if (!targetAlreadyHas && userId !== req.user.id) {
+        return res.status(403).json({ error: '权限不足：只有管理员可以授予「后台管理」模块' })
+      }
+    }
+  }
+
   db.run('DELETE FROM user_modules WHERE user_id = ?', [userId])
   for (const mid of moduleIds) {
     try { db.run('INSERT INTO user_modules (user_id, module_id) VALUES (?, ?)', [userId, mid]) } catch(e) {}
