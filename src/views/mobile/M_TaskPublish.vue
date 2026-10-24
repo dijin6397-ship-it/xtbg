@@ -55,15 +55,9 @@
         </div>
       </div>
 
-      <!-- Key work: executor selection -->
+      <!-- Key work: 创建时不再单独指派执行人，发布后通过新增子任务指派 -->
       <div v-if="form.flow_type === 'key_work'" class="form-group">
-        <label class="form-label">指派执行人 *</label>
-        <select class="form-select" v-model="form.assignee_id">
-          <option :value="null" disabled>请选择执行人</option>
-          <option v-for="u in techQualityUsers" :key="u.id" :value="u.id">
-            {{ u.name }}{{ u.title ? ' - ' + u.title : '' }}
-          </option>
-        </select>
+        <div class="keywork-hint">部门重点工作发布后，请在任务详情中通过「添加子任务」指派子任务执行人。</div>
       </div>
 
       <!-- Title (all flows, incl. daily_management) -->
@@ -140,7 +134,7 @@ const techQualityUsers = computed(() => {
 
 const allFlowTypes = [
   { value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析', color: '#1677ff', roles: ['admin', 'leader', 'supervisor'] },
-  { value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人', color: '#13c2c2', roles: ['admin', 'leader'] },
+  { value: 'key_work', label: '部门重点工作', desc: '领导发布，子任务指派执行人', color: '#13c2c2', roles: ['admin', 'leader'] },
   { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理', color: '#faad14', roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality'] }
 ]
 const flowTypes = computed(() => {
@@ -190,7 +184,8 @@ const isValid = computed(() => {
     return form.task_type && form.title.trim() && form.description.trim()
   }
   if (form.flow_type === 'key_work') {
-    return form.assignee_id && form.title.trim() && form.description.trim()
+    // 创建时不再要求指派执行人：发布后通过新增子任务指派执行人
+    return form.title.trim() && form.description.trim()
   }
   if (form.flow_type === 'daily_management') {
     if (!form.management_category) return false
@@ -269,6 +264,10 @@ onMounted(async () => {
 .flow-type-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 .dict-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.keywork-hint {
+  font-size: 12px; color: var(--text-secondary); background: #e6fffb;
+  border: 1px solid #87e8de; border-radius: 8px; padding: 10px 12px; line-height: 1.6;
+}
 .dict-item {
   padding: 10px 6px; text-align: center; border: 1px solid var(--border);
   border-radius: 8px; font-size: 13px; cursor: pointer; transition: all 0.2s;

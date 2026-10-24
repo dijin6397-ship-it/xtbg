@@ -156,11 +156,14 @@ router.get('/report', authMiddleware, (req, res) => {
            u.name as user_name, u.department,
            t.title as task_title, t.task_type as task_type, t.created_at as task_created_at,
            t.deadline as task_deadline, t.status as task_status, t.supervisor_id as task_supervisor_id,
-           sup.name as supervisor_name
+           t.publisher_id as task_publisher_id, t.wbs_project_ids as task_wbs_project_ids, t.wbs_car_ids as task_wbs_car_ids,
+           sup.name as supervisor_name,
+           pub.name as publisher_name
     FROM task_outputs o
     LEFT JOIN users u ON o.user_id = u.id
     LEFT JOIN tasks t ON o.task_id = t.id
     LEFT JOIN users sup ON t.supervisor_id = sup.id
+    LEFT JOIN users pub ON t.publisher_id = pub.id
     WHERE 1=1
   `
   const params = []
@@ -186,7 +189,10 @@ router.get('/report', authMiddleware, (req, res) => {
       taskCreatedAt: row.task_created_at,
       taskDeadline: row.task_deadline,
       taskStatus: row.task_status,
+      taskWbsProjectIds: row.task_wbs_project_ids || '',
+      taskWbsCarIds: row.task_wbs_car_ids || '',
       supervisorName: row.supervisor_name,
+      publisherName: row.publisher_name || '',
       userId: row.user_id,
       userName: row.user_name,
       department: row.department,
@@ -223,6 +229,46 @@ router.get('/report', authMiddleware, (req, res) => {
     r.categoryL1Name = r.categoryL1 ? (catMap[r.categoryL1]?.name || '') : ''
     r.categoryL2Name = r.categoryL2 ? (catMap[r.categoryL2]?.name || '') : ''
     r.categoryL3Name = r.categoryL3 ? (catMap[r.categoryL3]?.name || '') : ''
+  }
+
+  // 解析任务上的 WBS 项目号 / 车号（JSON 数组文本），并带出项目名称，
+  // 供报表/导出展示「项目号 / 项目名称 / 车号」列。
+  const parseIdList = (raw) => {
+    if (!raw) return []
+    try {
+      const arr = JSON.parse(raw)
+      return Array.isArray(arr) ? arr.map(Number).filter(n => Number.isFinite(n)) : []
+    } catch (e) {
+      return String(raw).split(',').map(s => Number(String(s).trim())).filter(n => Number.isFinite(n))
+    }
+  }
+  const wbsIdSet = new Set()
+  for (const r of rows) {
+    for (const i of parseIdList(r.taskWbsProjectIds)) wbsIdSet.add(i)
+    for (const i of parseIdList(r.taskWbsCarIds)) wbsIdSet.add(i)
+  }
+  const wbsMap = {}
+  const wbsIds = Array.from(wbsIdSet)
+  if (wbsIds.length > 0) {
+    const placeholders = wbsIds.map(() => '?').join(',')
+    const wStmt = db.prepare(`SELECT id, level, parent_id, code, name, project_name FROM wbs_items WHERE id IN (${placeholders})`)
+    wStmt.bind(wbsIds)
+    while (wStmt.step()) {
+      const w = wStmt.getAsObject()
+      wbsMap[w.id] = { id: w.id, level: w.level, parentId: w.parent_id, code: w.code || '', name: w.name, projectName: w.project_name || '' }
+    }
+    wStmt.free()
+  }
+  for (const r of rows) {
+    const projects = parseIdList(r.taskWbsProjectIds).map(i => wbsMap[i]).filter(Boolean)
+    const cars = parseIdList(r.taskWbsCarIds).map(i => wbsMap[i]).filter(Boolean)
+    // 车号所属项目（项目号列为空时用车号归属项目兜底）
+    const carParentIds = Array.from(new Set(cars.map(c => c.parentId).filter(Boolean)))
+    const carParents = carParentIds.map(i => wbsMap[i]).filter(Boolean)
+    const allProjects = [...projects, ...carParents.filter(p => !projects.some(x => x.id === p.id))]
+    r.wbsProjectCodes = allProjects.map(p => p.code || p.name)
+    r.wbsProjectNames = allProjects.map(p => p.projectName || p.name)
+    r.wbsCarNames = cars.map(c => c.code || c.name)
   }
 
   // Aggregations

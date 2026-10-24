@@ -43,8 +43,12 @@
           <span style="font-size: 13px" :style="{ color: isOverdue ? 'var(--danger)' : 'var(--text)' }">{{ task.deadline }}</span>
         </div>
         <div>
-          <div class="m-info-label">主管/执行人</div>
-          <span style="font-size: 13px">{{ task.task_type === "key_work" ? (task.direct_assignee?.name || task.assignees?.[0]?.name || "待指派") : (task.supervisor?.name || "-") }}</span>
+          <div class="m-info-label">主管/审核人</div>
+          <span style="font-size: 13px">{{ task.supervisor?.name || "-" }}</span>
+        </div>
+        <div>
+          <div class="m-info-label">执行人</div>
+          <span style="font-size: 13px">{{ executorDisplay }}</span>
         </div>
         <div>
           <div class="m-info-label">当前状态</div>
@@ -183,13 +187,15 @@
       <button v-if="(task.status === 'pending' || task.status === 'decomposing') && canRecall" class="btn btn-warning" @click="handleRecallTask">撤回任务</button>
       <template v-if="task.status === 'in_progress'">
         <button class="btn btn-outline" style="flex: 1" @click="showUrgePanel = true">催办</button>
-        <button class="btn btn-primary" style="flex: 1" @click="goFeedback">提交反馈</button>
+        <button v-if="canSubmitOutput" class="btn btn-primary" style="flex: 1" @click="goFeedback">
+          {{ hasRejectedOwnOutput ? '再次提交输出物' : '提交输出物' }}
+        </button>
       </template>
-      <button v-if="task.status === 'in_progress' && task.task_type === 'daily_management'" class="btn btn-primary" @click="goFeedback">反馈输出物</button>
+      <button v-if="task.status === 'in_progress' && task.task_type === 'daily_management' && canSubmitOutput" class="btn btn-primary" @click="goFeedback">反馈输出物</button>
       <button v-if="canDailyComplete" class="btn btn-success" @click="handleDailyComplete">完成任务</button>
       <button v-if="task.status === 'feedback'" class="btn btn-primary" @click="handleApplyComplete">申请完成</button>
-      <button v-if="task.status === 'review'" class="btn btn-outline" style="flex: 1" @click="handleRecallComplete">撤回申请</button>
-      <template v-if="task.status === 'review'">
+      <button v-if="task.status === 'review' && canFinalApprove" class="btn btn-outline" style="flex: 1" @click="handleRecallComplete">撤回申请</button>
+      <template v-if="task.status === 'review' && canFinalApprove">
         <button class="btn btn-outline" style="flex: 1" @click="handleReject">驳回</button>
         <button class="btn btn-primary" style="flex: 1" @click="handleApprove">批准完成</button>
       </template>
@@ -261,6 +267,31 @@ const progressColor = computed(() => {
 
 function getStatusKey(item) { return statusMap[item.status] || {} }
 
+// 执行人统一口径：子任务执行人（与子任务列表一致）；无子任务时回退任务级执行人
+const executorDisplay = computed(() => {
+  const names = task.value?.executor_names || []
+  if (names.length) return names.join('、')
+  const subNames = Array.from(new Set((task.value?.subtasks || []).map(s => s.assignee?.name).filter(Boolean)))
+  if (subNames.length) return subNames.join('、')
+  return task.value?.direct_assignee?.name ||
+    task.value?.assignees?.map(a => a.name).join('、') ||
+    '待指派'
+})
+
+// 提交输出物资格：子任务执行人 / 任务级执行人 / 发起人 / 员工角色
+const canSubmitOutput = computed(() => {
+  if (!task.value) return false
+  const uid = authStore.user?.id
+  const role = authStore.user?.role
+  if (task.value.task_type === 'daily_management') {
+    return task.value.publisher?.id === uid || task.value.publisher_id === uid || ['leader', 'admin'].includes(role)
+  }
+  if ((task.value.subtasks || []).some(s => s.assignee?.id === uid)) return true
+  if ((task.value.assignees || []).some(a => a.id === uid)) return true
+  if (task.value.publisher?.id === uid || task.value.publisher_id === uid) return true
+  return ['staff_tech', 'staff_quality'].includes(role)
+})
+
 function ruleLabel(rule) {
   return { fixed: '单值', range: '区间', any: '任意' }[rule] || ''
 }
@@ -290,6 +321,24 @@ const canRecallOutput = (output) => {
   const uid = authStore.user?.id
   return output.submitter?.id === uid && output.status === 'pending'
 }
+
+// 当前用户是否有被退回的输出物（用于「再次提交」文案）
+const hasRejectedOwnOutput = computed(() => {
+  const uid = authStore.user?.id
+  return (task.value?.outputs || []).some(o => o.status === 'rejected' && o.submitter?.id === uid)
+})
+
+// 最终审批（批准完成/驳回）权限：与后端 approve-final 一致
+const canFinalApprove = computed(() => {
+  if (!task.value) return false
+  const role = authStore.user?.role
+  const uid = authStore.user?.id
+  const isPublisher = task.value.publisher?.id === uid || task.value.publisher_id === uid
+  const isProjectOrDaily = ['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(task.value.task_type)
+  return role === 'admin' ||
+    (role === 'leader' && (task.value.task_type === 'key_work' || task.value.status === 'review' || task.value.status === 'overdue')) ||
+    (isPublisher && isProjectOrDaily)
+})
 
 function subProgressColor(p) {
   if (p >= 80) return '#52c41a'

@@ -5,8 +5,18 @@
       返回任务详情
     </button>
 
-    <h2 class="page-title">提交输出物</h2>
+    <h2 class="page-title">{{ isResubmitMode ? '再次提交输出物' : '提交输出物' }}</h2>
     <p class="page-desc">{{ task.title }}</p>
+
+    <!-- 被退回提示：输出物被退回后，执行人在此页面修改后再次提交（而非审核） -->
+    <div v-if="myRejectedOutputs.length" class="card reject-banner">
+      <div class="reject-banner-title">您有 {{ myRejectedOutputs.length }} 个输出物被退回，请根据审核意见修改后再次提交</div>
+      <div v-for="out in myRejectedOutputs" :key="'rj' + out.id" class="reject-item">
+        <div class="reject-content">{{ out.content }}</div>
+        <div class="reject-comment">审核意见：{{ out.reviewComment || '无' }}<span v-if="out.reviewer"> — {{ out.reviewer.name }}</span></div>
+        <button class="btn btn-sm" @click="prefillFromRejected(out)">基于此修改再次提交</button>
+      </div>
+    </div>
 
     <!-- Current Progress -->
     <div class="card">
@@ -80,7 +90,7 @@
       </div>
 
       <button class="btn btn-primary" @click="handleSubmitOutput" :disabled="!canSubmit || submitting">
-        {{ submitting ? '提交中...' : '提交输出物' }}
+        {{ submitting ? '提交中...' : (isResubmitMode ? '再次提交输出物' : '提交输出物') }}
       </button>
     </div>
 
@@ -223,6 +233,30 @@ const myIncompleteSubtasks = computed(() => {
   return task.value?.subtasks?.filter(s => s.status !== 'completed' && (!userId || s.assignee?.id === userId)) || []
 })
 
+// 当前用户被退回的输出物：输出物被退回后，执行人在此页面「再次提交」，
+// 而不是出现审核入口（审核权在发起人/领导侧）。
+const currentUserId = computed(() => JSON.parse(localStorage.getItem('user') || '{}')?.id)
+
+const myRejectedOutputs = computed(() => {
+  return (task.value?.outputs || []).filter(o => o.status === 'rejected' && o.submitter?.id === currentUserId.value)
+})
+
+const isResubmitMode = computed(() => myRejectedOutputs.value.length > 0)
+
+// 基于被退回的输出物预填表单：分类 / 内容 / 自评，执行人修改后再次提交
+function prefillFromRejected(out) {
+  outputContent.value = out.content || ''
+  category.value = {
+    l1: out.categoryL1 || null,
+    l2: out.categoryL2 || null,
+    l3: out.categoryL3 || null,
+    rule: null
+  }
+  selfScoreValue.value = out.scoreValue > 0 ? out.scoreValue : 0
+  selfScoreQty.value = out.scoreQuantity > 0 ? out.scoreQuantity : 1
+  if (out.subtaskId) selectedSubtaskId.value = out.subtaskId
+}
+
 const completedCount = computed(() => {
   return task.value?.subtasks?.filter(s => s.status === 'completed').length || 0
 })
@@ -324,6 +358,14 @@ onMounted(loadTask)
 .card-title { font-size: 15px; font-weight: 600; color: var(--text); margin: 0 0 10px 0; }
 .card-hint { font-size: 12px; color: var(--text-secondary); margin: 0 0 16px 0; }
 .required { color: var(--danger); }
+
+/* 被退回提示横幅 */
+.reject-banner { border: 1px solid #ffa39e; background: #fff2f0; }
+.reject-banner-title { font-size: 14px; font-weight: 600; color: #ff4d4f; margin-bottom: 10px; }
+.reject-item { padding: 10px 12px; background: #fff; border: 1px solid #ffd8d6; border-radius: 8px; margin-bottom: 8px; }
+.reject-item:last-child { margin-bottom: 0; }
+.reject-content { font-size: 13px; color: var(--text); margin-bottom: 4px; }
+.reject-comment { font-size: 12px; color: #ff4d4f; margin-bottom: 8px; }
 
 .progress-header { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 .progress-value { font-weight: 600; color: var(--primary); }

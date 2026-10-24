@@ -151,7 +151,7 @@
               <td>{{ task.completed_at || '-' }}</td>
               <td>
                 <router-link :to="`/admin/task/${task.id}`" class="btn btn-sm">查看</router-link>
-                <router-link v-if="canEdit" :to="`/admin/task/${task.id}`" class="btn btn-sm btn-edit">编辑</router-link>
+                <router-link v-if="canEditTask(task)" :to="`/admin/task/${task.id}`" class="btn btn-sm btn-edit">编辑</router-link>
                 <button v-if="canDelete" class="btn btn-sm btn-danger" @click="handleDelete(task.id)">删除</button>
               </td>
             </tr>
@@ -167,11 +167,17 @@ import { ref, computed, onMounted } from 'vue'
 import { taskAPI, userAPI, taskImportAPI, wbsAPI } from '../../api/index.js'
 import { taskTypeMap, authStore, canImportTasks } from '../../store/auth.js'
 
-const canEdit = computed(() => {
+const canDelete = computed(() => {
   const role = authStore.user?.role
   return ['admin', 'leader', 'supervisor'].includes(role)
 })
-const canDelete = canEdit
+
+// 编辑入口：仅任务发起人本人（或管理员）可见——谁发起谁修改
+function canEditTask(task) {
+  const role = authStore.user?.role
+  if (role === 'admin') return true
+  return Number(task.publisher?.id) === Number(authStore.user?.id)
+}
 
 const priorityMap = {
   urgent: { label: '紧急', color: '#ff4d4f', bg: '#fff2f0' },

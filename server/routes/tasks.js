@@ -105,10 +105,12 @@ function isPastDeadline(task) {
 }
 
 // 返回 { allowed: boolean, error?: string }
+// 规则（需求：A 发起的任务只能 A 修改）：任务编辑权仅属于【任务发起人】，
+// 在「子任务填写完成后、截止日期之前」的窗口内可继续修改；
+// 其他任何人（含主管/领导）一律不可编辑。管理员(admin)作为系统兜底保留编辑能力。
 function checkPublisherEditWindow(task, user) {
   if (!task) return { allowed: false, error: '任务不存在' }
   const isPublisher = Number(task.publisher_id) === Number(user.id)
-  const isAdminLike = ['admin', 'leader', 'supervisor'].includes(user.role)
   if (isPublisher) {
     if (task.status === 'completed' || task.status === 'cancelled') {
       return { allowed: false, error: '任务已完成或已撤回，发起人不能再修改' }
@@ -118,8 +120,8 @@ function checkPublisherEditWindow(task, user) {
     }
     return { allowed: true }
   }
-  if (isAdminLike) return { allowed: true }
-  return { allowed: false, error: '权限不足，仅任务发起人或管理员/主管/领导可修改' }
+  if (user.role === 'admin') return { allowed: true }
+  return { allowed: false, error: '权限不足：仅任务发起人可修改该任务' }
 }
 
 // ============================================================
@@ -207,6 +209,18 @@ function getFullTask(db, taskId) {
   }
   sStmt.free()
 
+  // 「执行人」统一口径：任务的实际执行人 = 子任务执行人（谁领子任务谁执行）。
+  // 任务信息卡片直接展示该列表，保证与子任务执行人完全一致（同一批人）。
+  // 历史数据无子任务时，回退到任务级执行人（key_work 的 direct_assignee / assignees）。
+  const subAssigneeMap = new Map()
+  for (const s of task.subtasks) {
+    if (s.assignee && s.assignee.id && !subAssigneeMap.has(Number(s.assignee.id))) {
+      subAssigneeMap.set(Number(s.assignee.id), s.assignee)
+    }
+  }
+  task.executor_list = Array.from(subAssigneeMap.values())
+  task.executor_names = task.executor_list.map(u => u.name)
+
   const oStmt = db.prepare(`
     SELECT o.*, u.name as reviewer_name
     FROM task_outputs o LEFT JOIN users u ON o.reviewer_id = u.id
@@ -247,6 +261,7 @@ function getFullTask(db, taskId) {
     const submitter = getUserById(db, row.user_id)
     task.outputs.push({
       id: row.id,
+      subtaskId: row.subtask_id || null,
       content: row.content,
       status: row.status,
       reviewComment: row.review_comment,
@@ -806,6 +821,38 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
   if (!category_l2) return res.status(400).json({ error: '请选择二级分类' })
   if (!category_l3) return res.status(400).json({ error: '请选择三级分类' })
 
+  // 提交人资格校验（需求：项目任务发布后，子任务执行人必须能提交输出物；
+  // 同时防止无关人员提交）：
+  // - 部门日常管理：发起人本人提交；
+  // - 其他类型：任务发起人、子任务执行人、任务级执行人（key_work 等）可提交；
+  //   管理员兜底。
+  const roleCheck = db.prepare('SELECT task_type, publisher_id FROM tasks WHERE id = ?')
+  roleCheck.bind([id])
+  const roleRow = roleCheck.step() ? roleCheck.getAsObject() : null
+  roleCheck.free()
+  if (!roleRow) return res.status(404).json({ error: '任务不存在' })
+
+  if (roleRow.task_type !== 'daily_management') {
+    const isPublisher = Number(roleRow.publisher_id) === Number(userId)
+    const isAdmin = req.user.role === 'admin'
+    let isExecutor = false
+    const subStmt2 = db.prepare('SELECT COUNT(*) AS c FROM subtasks WHERE task_id = ? AND assignee_id = ?')
+    subStmt2.bind([id, userId])
+    const subRow2 = subStmt2.step() ? subStmt2.getAsObject() : null
+    subStmt2.free()
+    if (subRow2 && subRow2.c > 0) isExecutor = true
+    if (!isExecutor) {
+      const asStmt = db.prepare('SELECT COUNT(*) AS c FROM task_assignees WHERE task_id = ? AND user_id = ?')
+      asStmt.bind([id, userId])
+      const asRow = asStmt.step() ? asStmt.getAsObject() : null
+      asStmt.free()
+      if (asRow && asRow.c > 0) isExecutor = true
+    }
+    if (!isPublisher && !isExecutor && !isAdmin) {
+      return res.status(403).json({ error: '权限不足：仅子任务执行人（或任务发起人）可提交输出物' })
+    }
+  }
+
   // Resolve rule + reference score from the chosen L3 entry
   const ruleStmt = db.prepare('SELECT score_rule, score_value, score_upper FROM dict_categories WHERE id = ?')
   ruleStmt.bind([category_l3])
@@ -1015,10 +1062,28 @@ router.post('/:id/review-output', authMiddleware, (req, res) => {
 })
 
 // POST /api/tasks/:id/approve-final - Leader gives final approval
+// 权限：管理员；领导（部门重点工作/待验收任务最终审批）；
+// 项目任务与部门日常管理由发起人本人确认完成（谁发起谁负责）。
 router.post('/:id/approve-final', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const { approved, comment, output_scores } = req.body
   const db = getDB()
+
+  const gateStmt = db.prepare('SELECT task_type, publisher_id, status FROM tasks WHERE id = ?')
+  gateStmt.bind([id])
+  const gateRow = gateStmt.step() ? gateStmt.getAsObject() : null
+  gateStmt.free()
+  if (!gateRow) return res.status(404).json({ error: '任务不存在' })
+
+  const role = req.user.role
+  const isPublisher = Number(gateRow.publisher_id) === Number(req.user.id)
+  const isProjectOrDaily = ['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(gateRow.task_type)
+  const canFinal = role === 'admin' ||
+    (role === 'leader' && (gateRow.task_type === 'key_work' || gateRow.status === 'review' || gateRow.status === 'overdue')) ||
+    (isPublisher && isProjectOrDaily)
+  if (!canFinal) {
+    return res.status(403).json({ error: '权限不足：仅发起人（项目任务/日常管理）或领导（重点工作/待验收）可执行最终审批' })
+  }
 
   if (approved) {
     // Apply leader-modified scores to approved outputs (for key_work tasks)

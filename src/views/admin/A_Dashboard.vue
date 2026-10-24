@@ -33,7 +33,11 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>任务名称</th>
+              <th>任务标题</th>
+              <th>发起人</th>
+              <th>项目号</th>
+              <th>项目名称</th>
+              <th>车号</th>
               <th>类型</th>
               <th>优先级</th>
               <th>状态</th>
@@ -45,6 +49,19 @@
           <tbody>
             <tr v-for="task in myTasks" :key="task.id" class="clickable-row" @click="$router.push(`/admin/task/${task.id}`)">
               <td class="cell-title">{{ task.title }}</td>
+              <td>{{ task.publisher?.name || '—' }}</td>
+              <td class="cell-wbs">
+                <span v-if="task.wbsProjectNames?.length" class="wbs-tag">{{ task.wbsProjectNames.join('、') }}</span>
+                <span v-else class="cell-empty">-</span>
+              </td>
+              <td class="cell-wbs">
+                <span v-if="wbsProjectDisplayNames(task).length" class="wbs-tag wbs-tag-name">{{ wbsProjectDisplayNames(task).join('、') }}</span>
+                <span v-else class="cell-empty">-</span>
+              </td>
+              <td class="cell-wbs">
+                <span v-if="task.wbsCarNames?.length" class="wbs-tag wbs-tag-car">{{ task.wbsCarNames.join('、') }}</span>
+                <span v-else class="cell-empty">-</span>
+              </td>
               <td>
                 <span class="tag" :style="{ color: taskTypeMap[task.task_type]?.color, background: taskTypeMap[task.task_type]?.bg }">
                   {{ taskTypeMap[task.task_type]?.label }}
@@ -78,7 +95,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { taskAPI } from '../../api/index.js'
+import { taskAPI, wbsAPI } from '../../api/index.js'
 import { authStore, roleMap, taskTypeMap } from '../../store/auth.js'
 
 const priorityMap = {
@@ -99,10 +116,30 @@ const statusMap = {
 
 const stats = ref({ total: 0, active: 0, overdue: 0, completed: 0, pending: 0, review: 0 })
 const allTasks = ref([])
+// WBS 字典：项目号 id -> 项目名称（用于「项目名称」列展示）
+const wbsNameMap = ref({})
+
+// 项目名称展示：优先 WBS 字典维护的「项目名称」，未维护时回退项目号名称
+function wbsProjectDisplayNames(task) {
+  const names = []
+  for (const p of (task.wbsProjects || [])) {
+    const pn = wbsNameMap.value[p.id]?.projectName
+    names.push(pn || p.name || p.code || '')
+  }
+  // 任务只挂了车号时，补上车号所属项目的名称
+  if (names.length === 0) {
+    for (const c of (task.wbsCars || [])) {
+      if (c.projectName && !names.includes(c.projectName)) names.push(c.projectName)
+    }
+  }
+  return Array.from(new Set(names.filter(Boolean)))
+}
 
 const myTasks = computed(() => {
   const uid = authStore.user?.id
   return allTasks.value.filter(t => {
+    // 已完成/已撤回的任务不再出现在「我的待办任务」中
+    if (t.status === 'completed' || t.status === 'cancelled') return false
     return t.publisher_id === uid || t.supervisor_id === uid ||
       t.assignees?.some(a => a.id === uid) ||
       t.subtasks?.some(s => s.assignee?.id === uid)
@@ -111,12 +148,18 @@ const myTasks = computed(() => {
 
 async function loadData() {
   try {
-    const [statsData, tasksData] = await Promise.all([
+    const [statsData, tasksData, wbsData] = await Promise.all([
       taskAPI.stats(),
-      taskAPI.list()
+      taskAPI.list(),
+      wbsAPI.tree().catch(() => ({ tree: [] }))
     ])
     stats.value = statsData
     allTasks.value = tasksData.tasks
+    const map = {}
+    for (const p of (wbsData.tree || [])) {
+      map[p.id] = { name: p.name || p.code || '', projectName: p.projectName || '' }
+    }
+    wbsNameMap.value = map
   } catch (e) {
     console.error('Dashboard load error:', e)
   }
@@ -162,6 +205,15 @@ onMounted(loadData)
 .clickable-row { cursor: pointer; transition: background 0.15s; }
 .clickable-row:hover { background: #fafbfc; }
 .cell-title { font-weight: 500; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-wbs { max-width: 160px; }
+.cell-empty { color: var(--text-caption); }
+.wbs-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 12px; font-weight: 500; color: var(--primary); background: var(--primary-light, #e6f4ff);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; vertical-align: middle;
+}
+.wbs-tag-car { color: #52c41a; background: #f6ffed; }
+.wbs-tag-name { color: #722ed1; background: #f9f0ff; }
 
 .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
 .cell-progress { display: flex; align-items: center; gap: 8px; }

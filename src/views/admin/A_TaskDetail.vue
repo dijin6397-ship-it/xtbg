@@ -109,6 +109,11 @@
               <button v-if="out.status === 'pending' && canRecallOutput(out)" class="btn btn-sm btn-danger" @click="handleRecallOutput(out.id)">
                 撤回
               </button>
+              <router-link
+                v-if="out.status === 'rejected' && out.submitter?.id === currentUserId && canSubmitOutputBtn && (task.status === 'in_progress' || task.status === 'feedback')"
+                :to="`/admin/task/${task.id}/feedback`"
+                class="btn btn-sm btn-primary"
+              >再次提交</router-link>
             </div>
             <div class="output-content">{{ out.content }}</div>
             <div v-if="out.categoryL1Name || out.categoryL3Name" class="output-category">
@@ -159,10 +164,14 @@
         <div class="info-list">
           <div class="info-row"><span class="info-label">任务类型</span><span>{{ taskTypeMap[task.task_type]?.label }}</span></div>
           <div class="info-row"><span class="info-label">发起人</span><span>{{ task.publisher?.name }}</span></div>
-          <div v-if="task.task_type === 'key_work'" class="info-row"><span class="info-label">执行人</span><span>{{ task.direct_assignee?.name || task.assignees?.map(a => a.name).join(', ') || '待指派' }}</span></div>
+          <!-- 执行人统一口径：子任务执行人（与下方「子任务」列表中的执行人完全一致）；
+               历史任务无子任务时回退到任务级执行人 -->
+          <div class="info-row">
+            <span class="info-label">执行人</span>
+            <span>{{ executorDisplay }}</span>
+          </div>
           <!-- 项目任务由发起人本人审核，这里展示为「审核人」 -->
-          <div v-else class="info-row"><span class="info-label">{{ isProjectTask ? '审核人' : '主管' }}</span><span>{{ task.supervisor?.name }}</span></div>
-          <div v-if="task.task_type !== 'key_work' && task.task_type !== 'daily_management'" class="info-row"><span class="info-label">责任人</span><span>{{ task.assignees?.map(a => a.name).join(', ') || '待分配' }}</span></div>
+          <div class="info-row"><span class="info-label">{{ isProjectTask ? '审核人' : '主管' }}</span><span>{{ task.supervisor?.name }}</span></div>
           <div v-if="task.task_type === 'daily_management' && task.management_category" class="info-row"><span class="info-label">管理类别</span><span>{{ task.management_category }}{{ task.management_detail ? ': ' + task.management_detail : '' }}</span></div>
           <div class="info-row"><span class="info-label">截止日期</span><span :class="{ 'text-danger': isOverdue }">{{ task.deadline || '未设置' }}</span></div>
           <div class="info-row"><span class="info-label">创建时间</span><span>{{ task.created_at }}</span></div>
@@ -184,10 +193,6 @@
           <button v-if="isProjectTask && canAssign && canEditSubtasks && !showAddSubtask" class="btn btn-primary btn-block" @click="openAddSubtask">
             分配子任务
           </button>
-          <!-- 项目任务：也可进入分解页批量分配 -->
-          <router-link v-if="isProjectTask && canAssign && canEditSubtasks && (task.status === 'decomposing' || task.status === 'pending')" :to="`/admin/task/${task.id}/decompose`" class="btn btn-block">
-            进入分解页批量分配
-          </router-link>
           <div v-if="isProjectTask && canAssign && !canEditSubtasks" class="action-hint">
             {{ editPermissionError || '当前不可分配子任务' }}
           </div>
@@ -217,8 +222,11 @@
 
           <!-- Staff: submit output -->
           <router-link v-if="canSubmitOutputBtn && (task.status === 'in_progress' || task.status === 'feedback')" :to="`/admin/task/${task.id}/feedback`" class="btn btn-primary btn-block">
-            提交输出物
+            {{ hasRejectedOwnOutput ? '再次提交输出物' : '提交输出物' }}
           </router-link>
+          <div v-if="hasRejectedOwnOutput && (task.status === 'in_progress' || task.status === 'feedback')" class="action-hint">
+            您有输出物被退回，请根据审核意见修改后再次提交
+          </div>
 
           <!-- Supervisor: review pending outputs -->
           <div v-if="canReview && hasPendingOutput" class="review-actions">
@@ -498,6 +506,8 @@ const isTaskPublisher = computed(() => {
 
 const isAdminUser = computed(() => authStore.user?.role === 'admin')
 
+const currentUserId = computed(() => authStore.user?.id)
+
 const canDistribute = computed(() => {
   // 部门重点工作仍由领导分发；项目任务（自主修/问题整改/现场质量问题分析）
   // 由发起人本人直接分配子任务，不再经过领导分发。
@@ -524,10 +534,13 @@ const canReview = computed(() => {
   // 常规：本任务的主管（含管理员）审核任务下所有输出物
   if ((canReviewOutput.value || ['supervisor', 'admin'].includes(authStore.user?.role)) &&
       Number(task.value.supervisor_id) === Number(uid)) return true
-  // 兜底：提交人可以审核自己提交的输出物。
-  // 例如「部门日常管理」任务由发起人本人提交并自评，而发起人可能是领导/普通员工，
-  // 不属于主管角色；若不放开这一条，其输出物无人可审，任务会永远卡在"无法完成"。
-  return (task.value.outputs || []).some(o => o.status === 'pending' && o.submitter?.id === uid)
+  // 兜底：仅「部门日常管理」任务允许提交人审核自己提交的输出物（该类型由发起人自评自审）。
+  // 其他类型（项目任务/部门重点工作）输出物被退回后，执行人只能「再次提交」，
+  // 不得在自己的页面看到审核入口，避免执行人自审自己的输出物。
+  if (task.value.task_type === 'daily_management') {
+    return (task.value.outputs || []).some(o => o.status === 'pending' && o.submitter?.id === uid)
+  }
+  return false
 })
 
 // 项目任务不再需要领导最终审批，由发起人本人确认完成；其他任务保持原逻辑（领导/管理员）。
@@ -570,12 +583,22 @@ const canSubmitOutputBtn = computed(() => {
   if (!task.value) return false
   const role = authStore.user?.role
   const uid = authStore.user?.id
-  // Staff can always submit outputs
+  // 部门日常管理：发起人本人提交输出物
+  if (task.value.task_type === 'daily_management') {
+    return isTaskPublisher.value || ['leader', 'admin'].includes(role)
+  }
+  // 子任务执行人（含项目任务发布后的执行人）：可提交输出物——
+  // 只要当前用户领了该任务的子任务，就始终展示「提交输出物」入口
+  const isSubtaskAssignee = (task.value.subtasks || []).some(s => s.assignee?.id === uid)
+  if (isSubtaskAssignee) return true
+  // 任务级执行人（部门重点工作的指派执行人等）
+  const isTaskAssignee = (task.value.assignees || []).some(a => a.id === uid) ||
+    task.value.direct_assignee?.id === uid
+  if (isTaskAssignee) return true
+  // 发起人本人（含主管/领导发起后自行执行的情况）
+  if (isTaskPublisher.value) return true
+  // Staff 角色兜底（历史任务可能未挂子任务）
   if (['staff_tech', 'staff_quality'].includes(role)) return true
-  // Supervisors can submit outputs for tasks they are assigned as supervisor (quality_analysis/self_repair/rectification)
-  if (['supervisor'].includes(role) && Number(task.value.supervisor_id) === Number(uid)) return true
-  // Leaders/admin can submit outputs for daily_management tasks
-  if (['leader', 'admin'].includes(role) && task.value.task_type === 'daily_management') return true
   return false
 })
 
@@ -824,11 +847,26 @@ const isKeyWorkAssignee = computed(() => {
   return task.value?.assignees?.some(a => a.id === uid) || task.value?.direct_assignee?.id === uid
 })
 
+// 执行人展示：优先子任务执行人（与子任务列表一致），无子任务时回退任务级执行人
+const executorDisplay = computed(() => {
+  const names = task.value?.executor_names || []
+  if (names.length) return names.join('、')
+  return task.value?.direct_assignee?.name ||
+    task.value?.assignees?.map(a => a.name).join('、') ||
+    '待指派'
+})
+
 const pendingOutputs = computed(() => {
   return task.value?.outputs?.filter(o => o.status === 'pending') || []
 })
 
 const hasPendingOutput = computed(() => pendingOutputs.value.length > 0)
+
+// 当前用户是否有被退回的输出物（用于展示「再次提交」入口与提示）
+const hasRejectedOwnOutput = computed(() => {
+  const uid = authStore.user?.id
+  return (task.value?.outputs || []).some(o => o.status === 'rejected' && o.submitter?.id === uid)
+})
 
 const canRecallOutput = (output) => {
   if (!output || !task.value) return false

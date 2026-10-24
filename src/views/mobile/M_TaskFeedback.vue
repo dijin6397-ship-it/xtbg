@@ -6,8 +6,20 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         <span style="font-size: 13px">返回</span>
       </div>
-      <h1 style="font-size: 17px; line-height: 1.4">提交输出物</h1>
+      <h1 style="font-size: 17px; line-height: 1.4">{{ myRejectedOutputs.length ? '再次提交输出物' : '提交输出物' }}</h1>
       <p style="font-size: 12px; opacity: 0.85; margin-top: 4px">{{ task.title }}</p>
+    </div>
+
+    <!-- 被退回提示：输出物被退回后执行人在此再次提交（而非审核） -->
+    <div v-if="myRejectedOutputs.length" class="card" style="border: 1px solid #ffa39e; background: #fff2f0">
+      <div style="font-size: 13px; font-weight: 600; color: #ff4d4f; margin-bottom: 8px">
+        您有 {{ myRejectedOutputs.length }} 个输出物被退回，请根据审核意见修改后再次提交
+      </div>
+      <div v-for="out in myRejectedOutputs" :key="'rj' + out.id" style="background: #fff; border: 1px solid #ffd8d6; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px">
+        <div style="font-size: 12px; color: var(--text); margin-bottom: 4px">{{ out.content }}</div>
+        <div style="font-size: 11px; color: #ff4d4f; margin-bottom: 6px">审核意见：{{ out.reviewComment || '无' }}</div>
+        <button class="btn btn-sm" @click="prefillFromRejected(out)">基于此修改再次提交</button>
+      </div>
     </div>
 
     <!-- Current Progress -->
@@ -62,7 +74,7 @@
       </div>
 
       <button class="btn btn-primary" @click="handleSubmit" :disabled="!canSubmit || submitting">
-        {{ submitting ? '提交中...' : '提交输出物' }}
+        {{ submitting ? '提交中...' : (myRejectedOutputs.length ? '再次提交输出物' : '提交输出物') }}
       </button>
     </div>
 
@@ -177,6 +189,19 @@ const canSubmit = computed(() => {
   return true
 })
 
+// 当前用户被退回的输出物：退回后执行人在此「再次提交」，而非审核
+const currentUserId = computed(() => JSON.parse(localStorage.getItem('user') || '{}')?.id)
+const myRejectedOutputs = computed(() => {
+  return (task.value?.outputs || []).filter(o => o.status === 'rejected' && o.submitter?.id === currentUserId.value)
+})
+
+function prefillFromRejected(out) {
+  outputContent.value = out.content || ''
+  category.value = { l1: out.categoryL1 || null, l2: out.categoryL2 || null, l3: out.categoryL3 || null, rule: null }
+  selfScoreValue.value = out.scoreValue > 0 ? out.scoreValue : 0
+  selfScoreQty.value = out.scoreQuantity > 0 ? out.scoreQuantity : 1
+}
+
 async function loadTask() {
   loading.value = true
   try {
@@ -244,6 +269,7 @@ onMounted(loadTask)
 }
 .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
 .tag-sm { font-size: 11px; padding: 1px 6px; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
 .tag-success { color: #52c41a; background: #f6ffed; }
 .tag-default { color: #8c8c8c; background: #f5f5f5; }
 

@@ -56,7 +56,24 @@ export const wbsAPI = {
   tree: () => request('/wbs/tree'),
   create: (data) => request('/wbs', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/wbs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  remove: (id) => request(`/wbs/${id}`, { method: 'DELETE' })
+  remove: (id) => request(`/wbs/${id}`, { method: 'DELETE' }),
+  // 批量扩充：下载 Excel 模板 / 导入 Excel（需后台管理模块权限）
+  async downloadTemplate() {
+    const token = getToken()
+    const res = await fetch(`${BASE}/wbs/import-template`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!res.ok) {
+      let msg = '模板下载失败'
+      try { msg = (await res.json()).error || msg } catch (e) { /* ignore */ }
+      throw new Error(msg)
+    }
+    return res.blob()
+  },
+  import: (fileBase64) => request('/wbs/import', {
+    method: 'POST',
+    body: JSON.stringify({ fileBase64 })
+  })
 }
 
 // 任务导入（独立权限 task_import）

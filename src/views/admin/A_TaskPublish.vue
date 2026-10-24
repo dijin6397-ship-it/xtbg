@@ -69,15 +69,12 @@
             </div>
           </div>
 
-          <!-- Key Work: select executor -->
+          <!-- Key Work: 创建时不再单独指派执行人（与「新增子任务」重复），
+               发布后由发起人在任务详情中新增子任务并指派子任务执行人 -->
           <div v-if="form.flow_type === 'key_work'" class="form-group">
-            <label class="form-label">指派执行人 <span class="required">*</span></label>
-            <select v-model="form.assignee_id" class="form-select">
-              <option :value="null" disabled>请选择执行人</option>
-              <option v-for="u in techQualityUsers" :key="u.id" :value="u.id">
-                {{ u.name }}{{ u.title ? ' - ' + u.title : '' }}{{ u.department ? ' (' + u.department + ')' : '' }}
-              </option>
-            </select>
+            <div class="keywork-hint">
+              部门重点工作发布后，请在任务详情页通过「新增子任务」指派子任务执行人。
+            </div>
           </div>
 
           <!-- Title (all flows, incl. daily_management) -->
@@ -166,7 +163,15 @@
                 <div class="flow-content">
                   <div class="flow-label">领导</div>
                   <div class="flow-value">{{ authStore.user?.name }}</div>
-                  <div class="flow-note">指派执行人</div>
+                  <div class="flow-note">发布任务</div>
+                </div>
+              </div>
+              <div class="flow-line"></div>
+              <div class="flow-step">
+                <div class="flow-dot"></div>
+                <div class="flow-content">
+                  <div class="flow-label">领导</div>
+                  <div class="flow-value">新增子任务并指派子任务执行人</div>
                 </div>
               </div>
               <div class="flow-line"></div>
@@ -251,7 +256,7 @@ const flowTypes = [
     roles: ['admin', 'leader', 'supervisor']
   },
   {
-    value: 'key_work', label: '部门重点工作', desc: '领导直接指派执行人',
+    value: 'key_work', label: '部门重点工作', desc: '领导发布，子任务指派执行人',
     bg: '#e6fffb', color: '#13c2c2',
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
     roles: ['admin', 'leader']
@@ -329,7 +334,8 @@ const isValid = computed(() => {
     return form.task_type && form.title.trim() && form.description.trim()
   }
   if (form.flow_type === 'key_work') {
-    return form.assignee_id && form.title.trim() && form.description.trim()
+    // 创建时不再要求指派执行人：发布后通过新增子任务指派执行人
+    return form.title.trim() && form.description.trim()
   }
   if (form.flow_type === 'daily_management') {
     if (!form.management_category) return false
@@ -423,6 +429,10 @@ onMounted(async () => {
 .type-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
 .dict-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.keywork-hint {
+  font-size: 12px; color: var(--text-secondary); background: #e6fffb;
+  border: 1px solid #87e8de; border-radius: 8px; padding: 10px 12px; line-height: 1.6;
+}
 .dict-item {
   padding: 10px 8px; text-align: center; border: 1px solid var(--border);
   border-radius: 8px; font-size: 13px; cursor: pointer; transition: all 0.2s;

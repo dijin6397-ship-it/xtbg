@@ -84,7 +84,7 @@
       <div v-for="r in rows" :key="r.id" class="m-row-item">
         <div style="display: flex; justify-content: space-between; margin-bottom: 4px">
           <span style="font-size: 13px; font-weight: 500">{{ r.userName }}</span>
-          <span class="tag" :class="statusClass(r.status)">{{ statusLabel(r.status) }}</span>
+          <span class="tag" :class="outputStatusClass(r)">{{ outputStatusLabel(r) }}</span>
         </div>
         <div v-if="r.taskTitle" style="font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px">{{ r.taskTitle }}</div>
         <div style="display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--text-caption); margin-bottom: 4px">
@@ -137,6 +137,9 @@ function onL1Change() { filters.l2 = ''; filters.l3 = ''; l2Options.value = allC
 function onL2Change() { filters.l3 = ''; l3Options.value = allCategories.value.filter(c => c.level === 3 && c.parentId === Number(filters.l2) && c.active) }
 function statusClass(s) { return { pending: 'tag-warning', approved: 'tag-success', rejected: 'tag-danger' }[s] || 'tag-default' }
 function statusLabel(s) { return { pending: '待审核', approved: '已通过', rejected: '已退回' }[s] || s }
+// 任务已完成时输出状态显示「已完成」，不再显示历史遗留的「待审核」
+function outputStatusLabel(r) { return r.taskStatus === 'completed' ? '已完成' : statusLabel(r.status) }
+function outputStatusClass(r) { return r.taskStatus === 'completed' ? 'tag-success' : statusClass(r.status) }
 function formatScore(v) { return Math.round((v || 0) * 100) / 100 }
 
 function typeLabel(t) { return taskTypeMap[t]?.label || t || '' }

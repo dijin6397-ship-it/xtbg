@@ -242,6 +242,51 @@ export async function initDB() {
   db.run(`CREATE INDEX IF NOT EXISTS idx_wbs_parent ON wbs_items(parent_id)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_wbs_level ON wbs_items(level)`)
 
+  // Migration: WBS 字典增加「项目名称」字段（level=1 项目WBS 条目）
+  // 例：项目号 N-A228 对应项目名称「02A01三架项目」；历史数据默认为空，
+  // 由管理员在「后台管理 - WBS字典维护」页面维护，或通过 Excel 模板批量导入。
+  try {
+    const wCols = db.exec("PRAGMA table_info(wbs_items)")
+    const wExisting = wCols[0] ? wCols[0].values.map(r => r[1]) : []
+    if (wExisting.length > 0 && !wExisting.includes('project_name')) {
+      db.run("ALTER TABLE wbs_items ADD COLUMN project_name TEXT DEFAULT ''")
+    }
+  } catch (e) { /* noop */ }
+
+  // Migration: 为历史项目WBS回填默认项目名称（仅当项目名称为空时），
+  // 与需求示例保持一致：N-A228 → 02A01三架项目。
+  try {
+    const backfill = [
+      ['N-A228', '02A01三架项目'],
+      ['N-A229', '02A02五架项目'],
+      ['N-A230', '02A03大修项目']
+    ]
+    for (const [code, pname] of backfill) {
+      db.run(
+        `UPDATE wbs_items SET project_name = ? WHERE level = 1 AND code = ? AND (project_name IS NULL OR project_name = '')`,
+        [pname, code]
+      )
+    }
+  } catch (e) { /* noop */ }
+
+  // Migration: 部门重点工作（key_work）统一改由「子任务」承载执行人
+  // （创建时不再单独指派执行人，发布后由发起人新增子任务并指派子任务执行人）。
+  // 历史 key_work 任务若只有任务级执行人而没有子任务，这里把执行人回填为子任务，
+  // 保证「任务信息-执行人」与子任务执行人一致，且执行人可走子任务流程提交输出物。
+  try {
+    db.run(`
+      INSERT INTO subtasks (task_id, title, assignee_id, status, progress, deadline)
+      SELECT t.id,
+             CASE WHEN t.title IS NULL OR t.title = '' THEN '任务执行' ELSE t.title END,
+             t.assignee_id, 'pending', 0, COALESCE(t.deadline, '')
+      FROM tasks t
+      WHERE t.task_type = 'key_work'
+        AND t.assignee_id IS NOT NULL
+        AND t.status NOT IN ('completed', 'cancelled')
+        AND NOT EXISTS (SELECT 1 FROM subtasks s WHERE s.task_id = t.id)
+    `)
+  } catch (e) { /* noop */ }
+
   // Migration: 用户细粒度权限（JSON 数组，如 ["task_import"]）
   try {
     const uCols = db.exec("PRAGMA table_info(users)")
@@ -726,16 +771,16 @@ function seedWbsIfEmpty() {
   if (count > 0) return
 
   const tree = [
-    { code: 'N-A228', name: 'N-A228', cars: ['0289', '0290', '0291'] },
-    { code: 'N-A229', name: 'N-A229', cars: ['0301', '0302'] },
-    { code: 'N-A230', name: 'N-A230', cars: ['0315'] }
+    { code: 'N-A228', name: 'N-A228', projectName: '02A01三架项目', cars: ['0289', '0290', '0291'] },
+    { code: 'N-A229', name: 'N-A229', projectName: '02A02五架项目', cars: ['0301', '0302'] },
+    { code: 'N-A230', name: 'N-A230', projectName: '02A03大修项目', cars: ['0315'] }
   ]
 
   let order = 1
   for (const proj of tree) {
     db.run(
-      `INSERT INTO wbs_items (level, parent_id, code, name, sort_order, active) VALUES (1, NULL, ?, ?, ?, 1)`,
-      [proj.code, proj.name, order++]
+      `INSERT INTO wbs_items (level, parent_id, code, name, project_name, sort_order, active) VALUES (1, NULL, ?, ?, ?, ?, 1)`,
+      [proj.code, proj.name, proj.projectName || '', order++]
     )
     const projId = db.exec('SELECT last_insert_rowid()')[0].values[0][0]
     for (const car of proj.cars) {

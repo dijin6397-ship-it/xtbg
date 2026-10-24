@@ -142,6 +142,10 @@
               <th>ID</th>
               <th>任务标题</th>
               <th>类型</th>
+              <th>发起人</th>
+              <th>项目号</th>
+              <th>项目名称</th>
+              <th>车号</th>
               <th>开始时间</th>
               <th>截至日期</th>
               <th>状态</th>
@@ -167,6 +171,10 @@
                 <span v-if="r.taskType" class="tag" :class="typeTagClass(r.taskType)">{{ typeLabel(r.taskType) }}</span>
                 <span v-else>—</span>
               </td>
+              <td>{{ r.publisherName || '—' }}</td>
+              <td class="cell-wbs">{{ (r.wbsProjectCodes || []).join('、') || '—' }}</td>
+              <td class="cell-wbs">{{ (r.wbsProjectNames || []).join('、') || '—' }}</td>
+              <td class="cell-wbs">{{ (r.wbsCarNames || []).join('、') || '—' }}</td>
               <td>{{ r.taskCreatedAt || '—' }}</td>
               <td :class="{ 'cell-overdue': r.taskStatus !== 'completed' && r.taskDeadline && new Date(r.taskDeadline) < new Date() }">{{ r.taskDeadline || '—' }}</td>
               <td>
@@ -184,7 +192,7 @@
               <td>{{ r.scoreQuantity > 0 ? r.scoreQuantity : '—' }}</td>
               <td><strong>{{ r.scoreTotal > 0 ? r.scoreTotal : '—' }}</strong></td>
               <td>
-                <span class="tag" :class="statusClass(r.status)">{{ statusLabel(r.status) }}</span>
+                <span class="tag" :class="outputStatusClass(r)">{{ outputStatusLabel(r) }}</span>
               </td>
               <td>{{ r.createdAt }}</td>
             </tr>
@@ -253,6 +261,16 @@ function statusClass(s) {
 }
 function statusLabel(s) {
   return { pending: '待审核', approved: '已通过', rejected: '已退回' }[s] || s
+}
+// 输出状态展示口径：任务已完成时，其输出物一律视为「已完成」，
+// 不再显示历史遗留的「待审核」（任务完成即代表输出物已被接收确认）。
+function outputStatusLabel(r) {
+  if (r.taskStatus === 'completed') return '已完成'
+  return statusLabel(r.status)
+}
+function outputStatusClass(r) {
+  if (r.taskStatus === 'completed') return 'tag-success'
+  return statusClass(r.status)
 }
 function formatScore(v) {
   return Math.round((v || 0) * 100) / 100
@@ -324,7 +342,8 @@ async function loadReport() {
     }
     rows.value = detailRows
     const approvedCount = detailRows.filter(r => r.status === 'approved').length
-    const pendingCount = detailRows.filter(r => r.status === 'pending').length
+    // 任务已完成的输出物不再计入「待审核」
+    const pendingCount = detailRows.filter(r => r.status === 'pending' && r.taskStatus !== 'completed').length
     summary.value = {
       totalCount: detailRows.length,
       grandTotal: data.summary?.grandTotal || 0,
@@ -343,9 +362,13 @@ async function loadReport() {
 }
 
 function exportExcel() {
-  const headers = ['ID', '任务标题', '类型', '开始时间', '截至日期', '状态', '主管', '提交人', '部门', '一级分类', '二级分类', '三级分类', '输出物', '分数', '数量', '总分', '输出状态', '提交时间']
+  const headers = ['ID', '任务标题', '类型', '发起人', '项目号', '项目名称', '车号', '开始时间', '截至日期', '状态', '主管', '提交人', '部门', '一级分类', '二级分类', '三级分类', '输出物', '分数', '数量', '总分', '输出状态', '提交时间']
   const data = rows.value.map(r => [
-    r.id, r.taskTitle || '', typeLabel(r.taskType), r.taskCreatedAt || '', r.taskDeadline || '',
+    r.id, r.taskTitle || '', typeLabel(r.taskType), r.publisherName || '',
+    (r.wbsProjectCodes || []).join('、'),
+    (r.wbsProjectNames || []).join('、'),
+    (r.wbsCarNames || []).join('、'),
+    r.taskCreatedAt || '', r.taskDeadline || '',
     taskStatusLabel(r.taskStatus), r.supervisorName || '',
     r.userName || '', r.department || '',
     r.categoryL1Name || '', r.categoryL2Name || '', r.categoryL3Name || '',
@@ -353,7 +376,8 @@ function exportExcel() {
     r.scoreValue > 0 ? r.scoreValue : '',
     r.scoreQuantity > 0 ? r.scoreQuantity : '',
     r.scoreTotal > 0 ? r.scoreTotal : '',
-    statusLabel(r.status),
+    // 任务已完成时输出状态显示「已完成」，而非历史遗留的「待审核」
+    outputStatusLabel(r),
     r.createdAt || ''
   ])
   const bom = '\uFEFF'
@@ -436,6 +460,7 @@ onMounted(async () => {
 .cell-id { color: var(--text-secondary); font-family: monospace; }
 .cell-title { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-content { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell-wbs { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-overdue { color: #ff4d4f !important; font-weight: 600; }
 
 .tag-type-self_repair { color: #1677ff; background: #e6f4ff; }
