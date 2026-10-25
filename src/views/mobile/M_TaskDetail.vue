@@ -110,8 +110,8 @@
       </div>
     </div>
 
-    <!-- Subtasks -->
-    <div class="card" v-if="task.subtasks.length">
+    <!-- Subtasks（部门日常管理按类别执行，不涉及子任务分配） -->
+    <div class="card" v-if="task.subtasks.length && task.task_type !== 'daily_management'">
       <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px">子任务 ({{ task.subtasks.length }})</div>
       <div v-for="sub in task.subtasks" :key="sub.id" class="m-subtask-item">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px">
@@ -183,7 +183,7 @@
     <!-- Bottom Actions -->
     <div class="m-action-bar">
       <button v-if="task.status === 'pending' && task.task_type !== 'key_work' && task.task_type !== 'daily_management' && canDistribute" class="btn btn-primary" @click="goDecompose">任务分解</button>
-      <button v-if="task.status === 'decomposing'" class="btn btn-primary" @click="goDecompose">添加子任务</button>
+      <button v-if="task.status === 'decomposing' && canManageSubtasks" class="btn btn-primary" @click="goDecompose">添加子任务</button>
       <button v-if="(task.status === 'pending' || task.status === 'decomposing') && canRecall" class="btn btn-warning" @click="handleRecallTask">撤回任务</button>
       <template v-if="task.status === 'in_progress'">
         <button class="btn btn-outline" style="flex: 1" @click="showUrgePanel = true">催办</button>
@@ -253,6 +253,16 @@ const canDistribute = computed(() => {
   const role = authStore.user?.role
   return role === 'admin' || role === 'supervisor' || 
     (role && task.value?.supervisor_id === authStore.user?.id)
+})
+
+// 子任务分配：部门日常管理不涉及；发起人负责制任务（项目任务/部门重点工作）仅发起人/管理员可分配
+const canManageSubtasks = computed(() => {
+  if (!task.value) return false
+  if (task.value.task_type === 'daily_management') return false
+  const role = authStore.user?.role
+  const uid = authStore.user?.id
+  const isPublisher = task.value.publisher?.id === uid || task.value.publisher_id === uid
+  return role === 'admin' || isPublisher
 })
 const priority = computed(() => priorityMap[task.value?.priority] || {})
 const status = computed(() => statusMap[task.value?.status] || {})
@@ -329,15 +339,16 @@ const hasRejectedOwnOutput = computed(() => {
 })
 
 // 最终审批（批准完成/驳回）权限：与后端 approve-final 一致
+// 发起人负责制任务（项目任务/部门重点工作）与日常管理由发起人确认完成；领导可复核待验收/逾期任务
 const canFinalApprove = computed(() => {
   if (!task.value) return false
   const role = authStore.user?.role
   const uid = authStore.user?.id
   const isPublisher = task.value.publisher?.id === uid || task.value.publisher_id === uid
-  const isProjectOrDaily = ['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(task.value.task_type)
+  const isPublisherOrDaily = ['self_repair', 'rectification', 'quality_analysis', 'key_work', 'daily_management'].includes(task.value.task_type)
   return role === 'admin' ||
-    (role === 'leader' && (task.value.task_type === 'key_work' || task.value.status === 'review' || task.value.status === 'overdue')) ||
-    (isPublisher && isProjectOrDaily)
+    (role === 'leader' && (task.value.status === 'review' || task.value.status === 'overdue')) ||
+    (isPublisher && isPublisherOrDaily)
 })
 
 function subProgressColor(p) {

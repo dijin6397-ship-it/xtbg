@@ -55,9 +55,9 @@
         </div>
       </div>
 
-      <!-- Key work: 创建时不再单独指派执行人，发布后通过新增子任务指派 -->
+      <!-- Key work: 与项目任务一致的发起人负责制 + 领导督办 -->
       <div v-if="form.flow_type === 'key_work'" class="form-group">
-        <div class="keywork-hint">部门重点工作发布后，请在任务详情中通过「添加子任务」指派子任务执行人。</div>
+        <div class="keywork-hint">部门重点工作仅由领导发布。发布后请在任务详情中「添加子任务」指派执行人，输出物由您审核评分并确认完成，期间可随时督办。</div>
       </div>
 
       <!-- Title (all flows, incl. daily_management) -->
@@ -133,8 +133,8 @@ const techQualityUsers = computed(() => {
 })
 
 const allFlowTypes = [
-  { value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析', color: '#1677ff', roles: ['admin', 'leader', 'supervisor'] },
-  { value: 'key_work', label: '部门重点工作', desc: '领导发布，子任务指派执行人', color: '#13c2c2', roles: ['admin', 'leader'] },
+  { value: 'project', label: '项目任务', desc: '主管/领导发布，子任务分配与审核评分', color: '#1677ff', roles: ['admin', 'leader', 'supervisor'] },
+  { value: 'key_work', label: '部门重点工作', desc: '仅领导发布，子任务分配与领导督办', color: '#13c2c2', roles: ['admin', 'leader'] },
   { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理', color: '#faad14', roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality'] }
 ]
 const flowTypes = computed(() => {

@@ -1,5 +1,5 @@
 <template>
-  <div class="page" v-if="task">
+  <div class="page" v-if="task && !isDailyManagement">
     <!-- Header -->
     <div class="page-header" style="padding-bottom: 16px">
       <div class="m-back-row" @click="$router.back()">
@@ -52,10 +52,11 @@
       </div>
       <div class="form-group">
         <label class="form-label">负责人</label>
-        <select class="form-select" v-model="newSubtask.assigneeId">
-          <option :value="null" disabled>请选择负责人</option>
-          <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }} ({{ u.dept }})</option>
-        </select>
+        <PersonSelector
+          v-model="newSubtask.assigneeId"
+          :options="users"
+          placeholder="输入姓名/拼音/简写搜索"
+        />
       </div>
       <button class="btn btn-outline" style="width: 100%" @click="addSubtask" :disabled="!canAdd">确认添加</button>
     </div>
@@ -63,6 +64,19 @@
     <!-- Finish Button -->
     <div style="padding: 12px 16px 24px">
       <button class="btn btn-primary" @click="finishDecompose" :disabled="!task.subtasks.length">完成分解</button>
+    </div>
+  </div>
+
+  <!-- 部门日常管理：不需要新增子任务分配 -->
+  <div v-else-if="task && isDailyManagement" class="page" style="padding: 16px">
+    <div class="m-back-row" @click="$router.back()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      <span style="font-size: 13px">返回</span>
+    </div>
+    <div class="card">
+      <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin: 0">
+        部门日常管理任务按管理类别直接执行并反馈输出物，不需要分配子任务。
+      </p>
     </div>
   </div>
 
@@ -75,11 +89,15 @@
 import { ref, computed, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { store, users, priorityMap, statusMap, addSubtasks, updateTaskStatus } from '../../store/tasks.js'
+import PersonSelector from '../../components/PersonSelector.vue'
 
 const route = useRoute()
 const router = useRouter()
 
 const task = computed(() => store.tasks.find(t => t.id === Number(route.params.id)))
+
+// 部门日常管理不涉及子任务分配
+const isDailyManagement = computed(() => task.value?.task_type === 'daily_management')
 
 function getPriority(t) { return priorityMap[t.priority] || {} }
 function getStatus(t) { return statusMap[t.status] || {} }

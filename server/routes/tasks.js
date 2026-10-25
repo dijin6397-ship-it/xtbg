@@ -125,20 +125,40 @@ function checkPublisherEditWindow(task, user) {
 }
 
 // ============================================================
+// 任务流程分组
+// ============================================================
+// 发起人负责制任务（谁发起谁分配子任务、谁发起谁审核、谁发起谁确认完成）：
+//   - 项目任务：自主修 / 问题整改 / 现场质量问题分析（主管、领导可发布）
+//   - 部门重点工作（仅领导可发布，另有领导督办）
+// 部门日常管理不涉及子任务分配，也不需要分解流程。
+// ============================================================
+const PUBLISHER_FLOW_TASK_TYPES = ['self_repair', 'rectification', 'quality_analysis', 'key_work']
+
+function isPublisherFlowTask(taskType) {
+  return PUBLISHER_FLOW_TASK_TYPES.includes(taskType)
+}
+
+// ============================================================
 // 子任务分配/编辑权限（比任务编辑更严格）
-// 项目任务（自主修/问题整改/现场质量问题分析）遵循「谁发起谁分配子任务」：
+// 发起人负责制任务（项目任务 / 部门重点工作）遵循「谁发起谁分配子任务」：
 //   仅发起人本人或管理员可增删改子任务，其他主管/领导不得干预。
+// 部门日常管理：不涉及子任务分配，任何人不得新增子任务。
 // 其他任务类型沿用 checkPublisherEditWindow（管理员/主管/领导亦可）。
 // ============================================================
 function checkSubtaskAssignPermission(task, user) {
   if (!task) return { allowed: false, error: '任务不存在' }
-  const isProjectTask = ['self_repair', 'rectification', 'quality_analysis'].includes(task.task_type)
+
+  // 部门日常管理按类别执行，不需要（也不允许）新增子任务分配
+  if (task.task_type === 'daily_management') {
+    return { allowed: false, error: '部门日常管理任务无需分配子任务' }
+  }
+
   const isPublisher = Number(task.publisher_id) === Number(user.id)
   const isAdmin = user.role === 'admin'
 
-  if (isProjectTask) {
+  if (isPublisherFlowTask(task.task_type)) {
     if (!isPublisher && !isAdmin) {
-      return { allowed: false, error: '权限不足：项目任务由发起人分配子任务' }
+      return { allowed: false, error: '权限不足：项目任务/部门重点工作由发起人分配子任务' }
     }
     if (task.status === 'completed' || task.status === 'cancelled') {
       return { allowed: false, error: '任务已完成或已撤回，不能再调整子任务' }
@@ -491,14 +511,13 @@ router.post('/', authMiddleware, (req, res) => {
 
   // ============================================================
   // 「谁发起谁分配子任务、谁发起谁审核」：
-  // 项目任务（自主修/问题整改/现场质量问题分析）的 supervisor 统一设为发起人本人，
-  // 不再自动指向李俊南/蔡峥等固定主管。这样发起人即可分配子任务并审核输出物。
+  // 项目任务（自主修/问题整改/现场质量问题分析）与部门重点工作的 supervisor 统一设为发起人本人，
+  // 不再自动指向固定主管。这样发起人即可分配子任务并审核输出物。
   // 部门日常管理同样沿用「谁发起谁负责」。
-  // 部门重点工作保持原逻辑（可显式指定主管）。
   // ============================================================
   let supId = supervisor_id
   if (!supId) {
-    if (['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(task_type)) {
+    if (['self_repair', 'rectification', 'quality_analysis', 'key_work', 'daily_management'].includes(task_type)) {
       supId = publisherId
     }
   }
@@ -508,14 +527,12 @@ router.post('/', authMiddleware, (req, res) => {
     : `${taskTypeLabels[task_type] || task_type}任务`
 
   let initialStatus = 'pending'
-  if (task_type === 'key_work') {
-    initialStatus = 'in_progress'
-  } else if (task_type === 'daily_management') {
+  if (task_type === 'daily_management') {
     // daily_management 任务无需分解/分配流程，创建后直接进入进行中
     initialStatus = 'in_progress'
-  } else if (['self_repair', 'rectification', 'quality_analysis'].includes(task_type)) {
-    // 项目任务由发起人自行分配子任务，创建后直接进入「分解中」，
-    // 发起人随后在任务详情/分解页添加子任务与责任人
+  } else if (isPublisherFlowTask(task_type)) {
+    // 项目任务、部门重点工作：由发起人自行分配子任务，创建后进入「分解中」，
+    // 发起人随后在任务详情/分解页添加子任务与责任人，再点击「完成分配，开始执行」
     initialStatus = 'decomposing'
   }
 
@@ -632,12 +649,17 @@ router.get('/:id/edit-permission', authMiddleware, (req, res) => {
   const task = getFullTask(db, id)
   if (!task) return res.status(404).json({ error: '任务不存在' })
   const gate = checkPublisherEditWindow(task, req.user)
+  // 子任务编辑权限单独判定：部门日常管理不允许分配子任务，
+  // 项目任务/部门重点工作仅发起人（或管理员）可分配
+  const subGate = checkSubtaskAssignPermission(task, req.user)
   res.json({
     allowed: gate.allowed,
     error: gate.error || '',
     isPublisher: Number(task.publisher_id) === Number(req.user.id),
     isPastDeadline: isPastDeadline(task),
-    canEditSubtasks: gate.allowed
+    canEditSubtasks: subGate.allowed,
+    subtaskError: subGate.error || '',
+    supportsSubtasks: task.task_type !== 'daily_management'
   })
 })
 
@@ -649,6 +671,19 @@ router.post('/:id/assign', authMiddleware, (req, res) => {
 
   const task = getFullTask(db, id)
   if (!task) return res.status(404).json({ error: '任务不存在' })
+
+  // 部门日常管理不涉及子任务分配
+  if (task.task_type === 'daily_management') {
+    return res.status(403).json({ error: '部门日常管理任务无需分配子任务' })
+  }
+
+  // 含子任务的分配同样走子任务权限校验（项目任务/部门重点工作仅发起人可分配）
+  if (subtasks && Array.isArray(subtasks) && subtasks.length > 0) {
+    const gate = checkSubtaskAssignPermission(task, req.user)
+    if (!gate.allowed) {
+      return res.status(403).json({ error: gate.error })
+    }
+  }
 
   if (assignee_ids && Array.isArray(assignee_ids)) {
     for (const uid of assignee_ids) {
@@ -921,18 +956,20 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
     // Daily management: do NOT auto-complete. Keep task in_progress.
     // The submitter must manually click "complete" after self-reviewing all outputs.
     // (Previously this auto-completed for staff/supervisor roles — removed per requirement.)
-  } else if (tInfo && (tInfo.task_type === 'key_work' || tInfo.status === 'overdue') && tInfo.status !== 'review') {
-    // For key_work and overdue tasks: move to review status
+  } else if (tInfo && tInfo.status === 'overdue') {
+    // 逾期任务：提交输出物后进入待验收，由领导/管理员复核
     db.run('UPDATE tasks SET status = "review", updated_at = datetime("now","localtime") WHERE id = ?', [id])
   }
+  // 说明：项目任务与部门重点工作均为「谁发起谁审核」，提交输出物后保持进行中，
+  // 由发起人在任务详情中审核评分；子任务全部完成并通过审核后任务自动完成。
 
   const task = getFullTask(db, id)
   res.json({ task })
 })
 
 // POST /api/tasks/:id/review-output - 审核输出物
-// 规则：项目任务（自主修/问题整改/现场质量问题分析）由「发起人本人」审核（谁发起谁审核）；
-//       部门日常管理同样由发起人审核；部门重点工作由领导/管理员审核。
+// 规则：发起人负责制任务（项目任务：自主修/问题整改/现场质量问题分析；部门重点工作）
+//       由「发起人本人」审核评分（谁发起谁审核）；部门日常管理同样由发起人审核。
 router.post('/:id/review-output', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const { output_id, approved, comment, score_value, score_quantity } = req.body
@@ -949,24 +986,25 @@ router.post('/:id/review-output', authMiddleware, (req, res) => {
 
   const uid = req.user.id
   const role = req.user.role
-  const isProjectTask = ['self_repair', 'rectification', 'quality_analysis'].includes(tInfo.task_type)
+  const isPublisherFlow = isPublisherFlowTask(tInfo.task_type)
   const isDaily = tInfo.task_type === 'daily_management'
   const isPublisher = Number(tInfo.publisher_id) === Number(uid)
 
   let canReview = false
   if (role === 'admin') {
     canReview = true
-  } else if (isProjectTask || isDaily) {
+  } else if (isPublisherFlow || isDaily) {
     // 谁发起谁审核：发起人本人即可审核该任务下所有输出物
+    // （部门重点工作由领导发起，即由该领导审核评分，与项目任务一致）
     canReview = isPublisher
   } else {
-    // 部门重点工作：领导或本任务主管审核
+    // 其他类型：领导或本任务主管审核
     canReview = role === 'leader' || Number(tInfo.supervisor_id) === Number(uid)
   }
 
   // 兜底：仅「部门日常管理」允许提交人审核自己提交的输出物
   // （该类型任务由发起人本人提交并自评，若不放开会导致输出物无人可审、任务卡死）。
-  // 项目任务必须由发起人审核，提交人不得自审——即使提交人恰好也是发起人以外的人。
+  // 项目任务/部门重点工作必须由发起人审核，提交人不得自审。
   if (!canReview && isDaily) {
     const ownPending = db.prepare('SELECT COUNT(*) AS c FROM task_outputs WHERE id = ? AND task_id = ? AND user_id = ?')
     ownPending.bind([output_id, id, uid])
@@ -976,7 +1014,7 @@ router.post('/:id/review-output', authMiddleware, (req, res) => {
   }
 
   if (!canReview) {
-    return res.status(403).json({ error: '权限不足：项目任务由发起人审核，部门重点工作由领导审核' })
+    return res.status(403).json({ error: '权限不足：项目任务/部门重点工作由发起人审核' })
   }
 
   // Resolve the output and its reference rule
@@ -1042,13 +1080,13 @@ router.post('/:id/review-output', authMiddleware, (req, res) => {
       const newProgress = recalcProgress(db, id)
       // If all subtasks completed (100%)
       if (newProgress === 100) {
-        // 仅「部门重点工作」需要领导最终审批；
-        // 项目任务（谁发起谁审核）与日常管理由发起人审核通过后直接完成。
+        // 发起人负责制任务（项目任务/部门重点工作）与日常管理：
+        // 发起人审核通过后直接完成；逾期任务仍进入待验收由领导复核。
         const tCheck = db.prepare('SELECT task_type, status FROM tasks WHERE id = ?')
         tCheck.bind([id])
         const tRow = tCheck.step() ? tCheck.getAsObject() : null
         tCheck.free()
-        if (tRow && (tRow.task_type === 'key_work' || tRow.status === 'overdue')) {
+        if (tRow && tRow.status === 'overdue') {
           db.run('UPDATE tasks SET status = "review", progress = 100, updated_at = datetime("now","localtime") WHERE id = ?', [id])
         } else {
           db.run('UPDATE tasks SET status = "completed", progress = 100, completed_at = datetime("now","localtime"), updated_at = datetime("now","localtime") WHERE id = ?', [id])
@@ -1061,9 +1099,9 @@ router.post('/:id/review-output', authMiddleware, (req, res) => {
   res.json({ task })
 })
 
-// POST /api/tasks/:id/approve-final - Leader gives final approval
-// 权限：管理员；领导（部门重点工作/待验收任务最终审批）；
-// 项目任务与部门日常管理由发起人本人确认完成（谁发起谁负责）。
+// POST /api/tasks/:id/approve-final - 最终确认完成 / 退回重做
+// 权限：发起人负责制任务（项目任务/部门重点工作）与部门日常管理由发起人本人确认完成；
+//       领导仍可对「待验收/逾期」状态任务复核；管理员兜底。
 router.post('/:id/approve-final', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const { approved, comment, output_scores } = req.body
@@ -1077,17 +1115,16 @@ router.post('/:id/approve-final', authMiddleware, (req, res) => {
 
   const role = req.user.role
   const isPublisher = Number(gateRow.publisher_id) === Number(req.user.id)
-  const isProjectOrDaily = ['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(gateRow.task_type)
+  const isPublisherOrDaily = isPublisherFlowTask(gateRow.task_type) || gateRow.task_type === 'daily_management'
   const canFinal = role === 'admin' ||
-    (role === 'leader' && (gateRow.task_type === 'key_work' || gateRow.status === 'review' || gateRow.status === 'overdue')) ||
-    (isPublisher && isProjectOrDaily)
+    (role === 'leader' && (gateRow.status === 'review' || gateRow.status === 'overdue')) ||
+    (isPublisher && isPublisherOrDaily)
   if (!canFinal) {
-    return res.status(403).json({ error: '权限不足：仅发起人（项目任务/日常管理）或领导（重点工作/待验收）可执行最终审批' })
+    return res.status(403).json({ error: '权限不足：仅发起人（项目任务/部门重点工作/日常管理）或领导（待验收/逾期）可执行最终审批' })
   }
 
   if (approved) {
-    // Apply leader-modified scores to approved outputs (for key_work tasks)
-    // output_scores: [{ output_id, score_value, score_quantity }]
+    // 应用发起人修改后的分值（output_scores: [{ output_id, score_value, score_quantity }]）
     if (Array.isArray(output_scores) && output_scores.length > 0) {
       for (const item of output_scores) {
         if (!item.output_id) continue

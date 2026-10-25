@@ -11,6 +11,7 @@
     "start": "echo Please run 'npm run server' and 'npm run dev' in separate terminals"
   },
   "dependencies": {
+    "pinyin-pro": "^3.29.5",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",
     "xlsx": "^0.18.5"

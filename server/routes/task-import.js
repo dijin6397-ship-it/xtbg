@@ -333,9 +333,9 @@ router.post('/import', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPORT
     }
 
     // 默认主管（与 POST /api/tasks 一致）：
-    // 项目任务与日常管理均为「谁发起谁负责」——默认主管 = 导入操作人（发起人）
+    // 项目任务、部门重点工作与日常管理均为「谁发起谁负责」——默认主管 = 导入操作人（发起人）
     if (!supId) {
-      if (['self_repair', 'rectification', 'quality_analysis', 'daily_management'].includes(taskType)) {
+      if (['self_repair', 'rectification', 'quality_analysis', 'key_work', 'daily_management'].includes(taskType)) {
         supId = publisherId
       }
     }
@@ -347,10 +347,12 @@ router.post('/import', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPORT
         : '[ ' + managementCategory + ' ]' + (fullDescription ? '\n' + fullDescription : '')
     }
 
-    const isProject = ['self_repair', 'rectification', 'quality_analysis'].includes(taskType)
-    const initialStatus = (taskType === 'key_work' || taskType === 'daily_management')
+    // 发起人负责制任务（项目任务 / 部门重点工作）创建后进入「分解中」，
+    // 由发起人新增子任务并指派执行人；日常管理直接进入进行中。
+    const isPublisherFlow = ['self_repair', 'rectification', 'quality_analysis', 'key_work'].includes(taskType)
+    const initialStatus = taskType === 'daily_management'
       ? 'in_progress'
-      : (isProject ? 'decomposing' : 'pending')
+      : (isPublisherFlow ? 'decomposing' : 'pending')
 
     try {
       db.run(`
@@ -367,12 +369,10 @@ router.post('/import', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPORT
       const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0]
       createdIds.push(id)
 
-      if (taskType === 'key_work' && assigneeIds[0]) {
-        db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, assigneeIds[0]])
-      } else {
-        for (const uid of assigneeIds) {
-          db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, uid])
-        }
+      // 责任人统一记录在 task_assignees（部门重点工作与项目任务一致，
+      // 实际执行人以后续新增的子任务指派为准）
+      for (const uid of assigneeIds) {
+        db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, uid])
       }
 
       db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "import", ?)',

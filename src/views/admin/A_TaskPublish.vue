@@ -69,11 +69,13 @@
             </div>
           </div>
 
-          <!-- Key Work: 创建时不再单独指派执行人（与「新增子任务」重复），
-               发布后由发起人在任务详情中新增子任务并指派子任务执行人 -->
+          <!-- Key Work: 与项目任务一致的「发起人负责制」流程：
+               领导发布 → 领导新增子任务并指派执行人 → 执行人提交输出物 → 领导审核评分 → 确认完成；
+               额外支持领导督办。 -->
           <div v-if="form.flow_type === 'key_work'" class="form-group">
             <div class="keywork-hint">
-              部门重点工作发布后，请在任务详情页通过「新增子任务」指派子任务执行人。
+              部门重点工作仅由领导发布。发布后请在任务详情页通过「新增子任务」指派执行人，
+              执行人提交输出物后由您本人审核评分并确认完成；期间可随时对任务或子任务进行督办。
             </div>
           </div>
 
@@ -156,22 +158,22 @@
               </div>
             </template>
 
-            <!-- Key work flow -->
+            <!-- Key work flow：与项目任务一致的发起人负责制 + 领导督办 -->
             <template v-if="form.flow_type === 'key_work'">
               <div class="flow-step">
                 <div class="flow-dot active"></div>
                 <div class="flow-content">
-                  <div class="flow-label">领导</div>
+                  <div class="flow-label">发起人（领导）</div>
                   <div class="flow-value">{{ authStore.user?.name }}</div>
-                  <div class="flow-note">发布任务</div>
+                  <div class="flow-note">发布任务（仅领导可发布）</div>
                 </div>
               </div>
               <div class="flow-line"></div>
               <div class="flow-step">
                 <div class="flow-dot"></div>
                 <div class="flow-content">
-                  <div class="flow-label">领导</div>
-                  <div class="flow-value">新增子任务并指派子任务执行人</div>
+                  <div class="flow-label">发起人（领导）</div>
+                  <div class="flow-value">新增子任务并指派执行人</div>
                 </div>
               </div>
               <div class="flow-line"></div>
@@ -179,15 +181,24 @@
                 <div class="flow-dot"></div>
                 <div class="flow-content">
                   <div class="flow-label">执行人</div>
-                  <div class="flow-value">执行并反馈输出物</div>
+                  <div class="flow-value">执行并提交输出物</div>
+                </div>
+              </div>
+              <div class="flow-line"></div>
+              <div class="flow-step">
+                <div class="flow-dot"></div>
+                <div class="flow-content">
+                  <div class="flow-label">发起人（领导）审核</div>
+                  <div class="flow-value">审核输出物并评分</div>
                 </div>
               </div>
               <div class="flow-line"></div>
               <div class="flow-step">
                 <div class="flow-dot final"></div>
                 <div class="flow-content">
-                  <div class="flow-label">领导审核</div>
-                  <div class="flow-value">直接审核完成</div>
+                  <div class="flow-label">完成</div>
+                  <div class="flow-value">发起人确认完成</div>
+                  <div class="flow-note">全程可由领导督办</div>
                 </div>
               </div>
             </template>
@@ -250,13 +261,13 @@ const techQualityUsers = computed(() => {
 
 const flowTypes = [
   {
-    value: 'project', label: '项目任务', desc: '自主修/问题整改/质量分析',
+    value: 'project', label: '项目任务', desc: '主管/领导发布，子任务分配与审核评分',
     bg: '#e6f4ff', color: '#1677ff',
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>',
     roles: ['admin', 'leader', 'supervisor']
   },
   {
-    value: 'key_work', label: '部门重点工作', desc: '领导发布，子任务指派执行人',
+    value: 'key_work', label: '部门重点工作', desc: '仅领导发布，子任务分配与领导督办',
     bg: '#e6fffb', color: '#13c2c2',
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
     roles: ['admin', 'leader']

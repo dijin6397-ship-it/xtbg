@@ -322,6 +322,13 @@ export async function initDB() {
     db.run(`UPDATE tasks SET supervisor_id = publisher_id, updated_at = datetime('now','localtime') WHERE task_type = 'daily_management' AND supervisor_id IS NULL`)
   } catch (e) { /* noop */ }
 
+  // Migration: 部门重点工作（key_work）与项目任务统一为「谁发起谁分配、谁发起谁审核评分、谁发起谁确认完成」。
+  // 历史任务的 supervisor 可能指向他人，这里统一改为发起人本人，保证审核人展示与审核权限一致；
+  // 领导督办能力不变（督办为领导/管理员角色能力）。
+  try {
+    db.run(`UPDATE tasks SET supervisor_id = publisher_id, updated_at = datetime('now','localtime') WHERE task_type = 'key_work' AND (supervisor_id IS NULL OR supervisor_id != publisher_id)`)
+  } catch (e) { /* noop */ }
+
   // ============================================================
   // Migration: 角色合并 —— 技术主管(supervisor_tech) + 质量主管(supervisor_quality) 合并为「主管(supervisor)」
   // 合并后：项目任务（自主修/问题整改/现场质量问题分析）由主管/领导发起，

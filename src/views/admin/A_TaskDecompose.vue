@@ -1,5 +1,5 @@
 <template>
-  <div class="page-wrap" v-if="task">
+  <div class="page-wrap" v-if="task && !isDailyManagement">
     <button class="back-btn" @click="$router.push(`/admin/task/${task.id}`)">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
       返回任务详情
@@ -64,10 +64,11 @@
         </div>
         <div class="form-group" style="flex:1">
           <label class="form-label">{{ isQualityType ? '质量员' : '技术员' }}</label>
-          <select class="form-select" v-model="newAssigneeId">
-            <option :value="null" disabled>请选择</option>
-            <option v-for="u in availableStaff" :key="u.id" :value="u.id">{{ u.name }}</option>
-          </select>
+          <PersonSelector
+            v-model="newAssigneeId"
+            :options="availableStaff"
+            placeholder="搜索姓名/拼音/简写..."
+          />
         </div>
         <div class="form-group" style="flex:0;align-self:flex-end">
           <button class="btn btn-primary" @click="addSub" :disabled="!canAdd">添加</button>
@@ -91,6 +92,20 @@
     </div>
   </div>
 
+  <!-- 部门日常管理：不需要新增子任务分配 -->
+  <div v-else-if="task && isDailyManagement" class="page-wrap">
+    <button class="back-btn" @click="$router.push(`/admin/task/${task.id}`)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      返回任务详情
+    </button>
+    <h2 class="page-title">任务分解与分配</h2>
+    <div class="card">
+      <p class="card-hint" style="margin:0">
+        部门日常管理任务按管理类别直接执行并反馈输出物，不需要分配子任务。
+      </p>
+    </div>
+  </div>
+
   <div v-else class="empty-state" style="padding:100px 0;text-align:center">
     {{ loading ? '加载中...' : '任务不存在' }}
   </div>
@@ -101,6 +116,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { taskAPI, userAPI } from '../../api/index.js'
 import { taskTypeMap } from '../../store/auth.js'
+import PersonSelector from '../../components/PersonSelector.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -122,6 +138,8 @@ const statusMap = {
 }
 
 const isQualityType = computed(() => task.value?.task_type === 'quality_analysis')
+// 部门日常管理不涉及子任务分配
+const isDailyManagement = computed(() => task.value?.task_type === 'daily_management')
 
 const availableStaff = computed(() => {
   if (isQualityType.value) {
