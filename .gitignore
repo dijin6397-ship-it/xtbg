@@ -23,3 +23,7 @@ task_summary.html
 
 # graphify 生成的分析产物（本地知识图谱，体积大且可重建）
 graphify-out/
+
+# 本地一次性补丁脚本
+patch.py
+patch1.py

@@ -191,7 +191,6 @@
           {{ hasRejectedOwnOutput ? '再次提交输出物' : '提交输出物' }}
         </button>
       </template>
-      <button v-if="task.status === 'in_progress' && task.task_type === 'daily_management' && canSubmitOutput" class="btn btn-primary" @click="goFeedback">反馈输出物</button>
       <button v-if="canDailyComplete" class="btn btn-success" @click="handleDailyComplete">完成任务</button>
       <button v-if="task.status === 'feedback'" class="btn btn-primary" @click="handleApplyComplete">申请完成</button>
       <button v-if="task.status === 'review' && canFinalApprove" class="btn btn-outline" style="flex: 1" @click="handleRecallComplete">撤回申请</button>
@@ -288,19 +287,23 @@ const executorDisplay = computed(() => {
     '待指派'
 })
 
-// 提交输出物资格：子任务执行人 / 任务级执行人 / 发起人 / 员工角色
+// Only the assigned executor can submit output
 const canSubmitOutput = computed(() => {
   if (!task.value) return false
   const uid = authStore.user?.id
-  const role = authStore.user?.role
-  if (task.value.task_type === 'daily_management') {
-    return task.value.publisher?.id === uid || task.value.publisher_id === uid || ['leader', 'admin'].includes(role)
-  }
-  if ((task.value.subtasks || []).some(s => s.assignee?.id === uid)) return true
-  if ((task.value.assignees || []).some(a => a.id === uid)) return true
-  if (task.value.publisher?.id === uid || task.value.publisher_id === uid) return true
-  return ['staff_tech', 'staff_quality'].includes(role)
+  
+  // Check if user is assigned to any subtask
+  const isSubtaskAssignee = (task.value.subtasks || []).some(s => s.assignee?.id === uid)
+  if (isSubtaskAssignee) return true
+  
+  // Check if user is the task-level assignee
+  const isTaskAssignee = (task.value.assignees || []).some(a => a.id === uid) ||
+    task.value.direct_assignee?.id === uid
+  if (isTaskAssignee) return true
+  
+  return false
 })
+
 
 function ruleLabel(rule) {
   return { fixed: '单值', range: '区间', any: '任意' }[rule] || ''

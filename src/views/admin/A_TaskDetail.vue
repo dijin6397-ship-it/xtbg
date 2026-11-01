@@ -563,26 +563,21 @@ const canStartExecution = computed(() => {
 
 const canSubmitOutputBtn = computed(() => {
   if (!task.value) return false
-  const role = authStore.user?.role
   const uid = authStore.user?.id
-  // 部门日常管理：发起人本人提交输出物
-  if (task.value.task_type === 'daily_management') {
-    return isTaskPublisher.value || ['leader', 'admin'].includes(role)
-  }
-  // 子任务执行人（含项目任务发布后的执行人）：可提交输出物——
-  // 只要当前用户领了该任务的子任务，就始终展示「提交输出物」入口
+  
+  // Only the assigned executor can submit output
+  // Check if user is assigned to any subtask
   const isSubtaskAssignee = (task.value.subtasks || []).some(s => s.assignee?.id === uid)
   if (isSubtaskAssignee) return true
-  // 任务级执行人（部门重点工作的指派执行人等）
+  
+  // Check if user is the task-level assignee
   const isTaskAssignee = (task.value.assignees || []).some(a => a.id === uid) ||
     task.value.direct_assignee?.id === uid
   if (isTaskAssignee) return true
-  // 发起人本人（含主管/领导发起后自行执行的情况）
-  if (isTaskPublisher.value) return true
-  // Staff 角色兜底（历史任务可能未挂子任务）
-  if (['staff_tech', 'staff_quality'].includes(role)) return true
+  
   return false
 })
+
 
 const canSupervise = computed(() => {
   const role = authStore.user?.role
@@ -593,7 +588,12 @@ const canSupervise = computed(() => {
 const canUrgeSubtask = computed(() => canSupervise.value || (isPublisherFlow.value && isTaskPublisher.value))
 
 
-const canDelete = computed(() => ['admin', 'leader', 'supervisor'].includes(authStore.user?.role))
+const canDelete = computed(() => {
+  // Only the task publisher can delete the task
+  const uid = authStore.user?.id
+  if (!task.value || !uid) return false
+  return Number(task.value.publisher_id) === Number(uid)
+})
 
 const canRecall = computed(() => {
   if (!task.value) return false

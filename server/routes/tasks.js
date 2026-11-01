@@ -856,36 +856,23 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
   if (!category_l2) return res.status(400).json({ error: '请选择二级分类' })
   if (!category_l3) return res.status(400).json({ error: '请选择三级分类' })
 
-  // 提交人资格校验（需求：项目任务发布后，子任务执行人必须能提交输出物；
-  // 同时防止无关人员提交）：
-  // - 部门日常管理：发起人本人提交；
-  // - 其他类型：任务发起人、子任务执行人、任务级执行人（key_work 等）可提交；
-  //   管理员兜底。
-  const roleCheck = db.prepare('SELECT task_type, publisher_id FROM tasks WHERE id = ?')
-  roleCheck.bind([id])
-  const roleRow = roleCheck.step() ? roleCheck.getAsObject() : null
-  roleCheck.free()
-  if (!roleRow) return res.status(404).json({ error: '任务不存在' })
-
-  if (roleRow.task_type !== 'daily_management') {
-    const isPublisher = Number(roleRow.publisher_id) === Number(userId)
-    const isAdmin = req.user.role === 'admin'
-    let isExecutor = false
-    const subStmt2 = db.prepare('SELECT COUNT(*) AS c FROM subtasks WHERE task_id = ? AND assignee_id = ?')
-    subStmt2.bind([id, userId])
-    const subRow2 = subStmt2.step() ? subStmt2.getAsObject() : null
-    subStmt2.free()
-    if (subRow2 && subRow2.c > 0) isExecutor = true
-    if (!isExecutor) {
-      const asStmt = db.prepare('SELECT COUNT(*) AS c FROM task_assignees WHERE task_id = ? AND user_id = ?')
-      asStmt.bind([id, userId])
-      const asRow = asStmt.step() ? asStmt.getAsObject() : null
-      asStmt.free()
-      if (asRow && asRow.c > 0) isExecutor = true
-    }
-    if (!isPublisher && !isExecutor && !isAdmin) {
-      return res.status(403).json({ error: '权限不足：仅子任务执行人（或任务发起人）可提交输出物' })
-    }
+  // Only assigned executors can submit output (publisher excluded)
+  // Check if user is assigned to any subtask
+  let isExecutor = false
+  const subStmt2 = db.prepare('SELECT COUNT(*) AS c FROM subtasks WHERE task_id = ? AND assignee_id = ?')
+  subStmt2.bind([id, userId])
+  const subRow2 = subStmt2.step() ? subStmt2.getAsObject() : null
+  subStmt2.free()
+  if (subRow2 && subRow2.c > 0) isExecutor = true
+  if (!isExecutor) {
+    const asStmt = db.prepare('SELECT COUNT(*) AS c FROM task_assignees WHERE task_id = ? AND user_id = ?')
+    asStmt.bind([id, userId])
+    const asRow = asStmt.step() ? asStmt.getAsObject() : null
+    asStmt.free()
+    if (asRow && asRow.c > 0) isExecutor = true
+  }
+  if (!isExecutor && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '权限不足：只有执行人可以提交输出物' })
   }
 
   // Resolve rule + reference score from the chosen L3 entry
@@ -1358,23 +1345,24 @@ router.put('/:id/recall', authMiddleware, (req, res) => {
   res.json({ task: updated })
 })
 
-// DELETE /api/tasks/:id - Delete task (admin only)
+// DELETE /api/tasks/:id - Delete task (only publisher can delete)
 router.delete('/:id', authMiddleware, (req, res) => {
   const id = Number(req.params.id)
   const db = getDB()
+  const userId = req.user.id
 
-  const deleteAllowedRoles = ['admin', 'leader', 'supervisor']
-  if (!deleteAllowedRoles.includes(req.user.role)) {
-    return res.status(403).json({ error: '权限不足，仅管理员/主管/领导可删除任务' })
-  }
-
-  const taskCheck = db.prepare('SELECT id FROM tasks WHERE id = ?')
+  const taskCheck = db.prepare('SELECT id, publisher_id FROM tasks WHERE id = ?')
   taskCheck.bind([id])
-  if (!taskCheck.step()) {
-    taskCheck.free()
+  const row = taskCheck.step() ? taskCheck.getAsObject() : null
+  taskCheck.free()
+  if (!row) {
     return res.status(404).json({ error: '任务不存在' })
   }
-  taskCheck.free()
+
+  // Only the task publisher can delete the task
+  if (Number(row.publisher_id) !== Number(userId)) {
+    return res.status(403).json({ error: '权限不足，只有任务发起人可以删除该任务' })
+  }
 
   db.run('DELETE FROM feedbacks WHERE task_id = ?', [id])
   db.run('DELETE FROM task_outputs WHERE task_id = ?', [id])
