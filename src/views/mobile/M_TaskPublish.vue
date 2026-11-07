@@ -135,7 +135,7 @@ const techQualityUsers = computed(() => {
 const allFlowTypes = [
   { value: 'project', label: '项目任务', desc: '主管/领导发布，子任务分配与审核评分', color: '#1677ff', roles: ['admin', 'leader', 'supervisor'] },
   { value: 'key_work', label: '部门重点工作', desc: '仅领导发布，子任务分配与领导督办', color: '#13c2c2', roles: ['admin', 'leader'] },
-  { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理', color: '#faad14', roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality'] }
+  { value: 'daily_management', label: '部门日常管理', desc: '全员可发起，无需指派，提交输出物即完成', color: '#faad14', roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality'] }
 ]
 const flowTypes = computed(() => {
   const role = authStore.user?.role

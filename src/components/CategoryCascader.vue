@@ -154,4 +154,7 @@ loadAll()
 .rule-any { color: #8c8c8c; background: #f5f5f5; }
 .rule-score { color: var(--text); font-weight: 500; }
 .rule-tip { color: var(--text-caption); }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.tag { white-space: nowrap; letter-spacing: .2px; }
 </style>

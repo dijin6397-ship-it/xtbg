@@ -97,4 +97,17 @@ onMounted(loadTask)
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .action-bar { padding: 8px 0; }
 .empty-hint { font-size: 13px; color: var(--text-caption); }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary { background: var(--primary-gradient); border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,119,255,.24); }
+.btn-primary:hover:not(:disabled) { background: #4096ff; box-shadow: 0 4px 14px rgba(22,119,255,.32); }
+.progress-bar { background: #eef0f3; }
+.form-textarea:hover { border-color: #c9cdd4; }
+.form-textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>

@@ -252,10 +252,14 @@
             </div>
           </div>
 
-          <!-- Daily management: direct complete (requires output + scoring/review first) -->
-          <div v-if="task.task_type === 'daily_management' && task.status === 'in_progress' && task.outputs?.length > 0 && !(task.outputs?.filter(o => o.status === 'pending').length > 0)" class="daily-complete-actions">
+          <!-- 部门日常管理：免指派、免审核，发起人提交输出物后任务自动完成 -->
+          <div v-if="isDailyManagement && task.status === 'in_progress'" class="action-hint">
+            部门日常管理任务无需主管指派与审核，发起人提交输出物后即完成。
+          </div>
+          <!-- 兼容历史数据：已有输出物但仍停留在进行中的日常任务 -->
+          <div v-if="canDailyComplete" class="daily-complete-actions">
             <button class="btn btn-primary btn-block" @click="handleDailyComplete">
-              完成任务
+              完成此任务
             </button>
           </div>
 
@@ -519,13 +523,19 @@ const canReview = computed(() => {
   // 兜底：仅「部门日常管理」任务允许提交人审核自己提交的输出物（该类型由发起人自评自审）。
   // 其他类型（项目任务/部门重点工作）输出物被退回后，执行人只能「再次提交」，
   // 不得在自己的页面看到审核入口，避免执行人自审自己的输出物。
-  if (isDailyManagement.value) {
-    return (task.value.outputs || []).some(o => o.status === 'pending' && o.submitter?.id === uid)
-  }
   return false
 })
 
 // 发起人负责制任务（项目任务/部门重点工作）由发起人本人确认完成；其他类型保持原逻辑（领导/管理员）。
+// 部门日常管理免审核：提交输出物后后端自动完成任务。
+// 仅在历史数据（已有输出物却仍停留进行中）时提供手动完成入口。
+const canDailyComplete = computed(() => {
+  if (!isDailyManagement.value || !task.value) return false
+  if (task.value.status !== 'in_progress') return false
+  if (!(task.value.outputs?.length > 0)) return false
+  return isTaskPublisher.value || isAdminUser.value
+})
+
 const canApprove = computed(() => {
   if (!task.value) return false
   if (isPublisherFlow.value) return isTaskPublisher.value || isAdminUser.value
@@ -597,11 +607,11 @@ const canDelete = computed(() => {
 
 const canRecall = computed(() => {
   if (!task.value) return false
-  if (task.value.status !== 'pending' && task.value.status !== 'decomposing') return false
-  const uid = authStore.user?.id
-  return isTaskPublisher.value ||
-    Number(task.value.supervisor_id) === Number(uid) ||
-    ['admin', 'leader'].includes(authStore.user?.role)
+  // 仅任务发起人可撤回（领导 / 主管 / 管理员均不可撤回他人发起的任务）
+  if (!isTaskPublisher.value) return false
+  // 部门日常管理发布后直接进入执行，允许发起人撤回
+  if (isDailyManagement.value) return task.value.status === 'in_progress'
+  return task.value.status === 'pending' || task.value.status === 'decomposing'
 })
 
 const canStartTask = computed(() => {
@@ -1008,26 +1018,14 @@ async function submitSubtaskUrge() {
 }
 
 async function handleDailyComplete() {
-  // Daily management tasks must have submitted output and must be reviewed/scored.
-  // Cannot complete directly without output submission and scoring/review.
+  // 部门日常管理任务免审核：提交输出物即完成，此处仅兼容历史数据
   if (!task.value?.outputs?.length) {
-    alert('部门日常管理任务必须先提交输出物并完成评分审核后才能完成，不能直接标记完成。')
+    alert('请先提交输出物，提交后任务会自动完成。')
     return
   }
-  const pending = task.value.outputs?.filter(o => o.status === 'pending') || []
-  if (pending.length > 0) {
-    alert('仍有未审核的输出物，请先完成审核评分后再标记完成。')
-    return
-  }
-  // Also require at least one output to have a score set (scored/reviewed)
-  const hasScored = task.value.outputs?.some(o => o.scoreValue !== undefined && o.scoreValue !== null)
-  if (!hasScored) {
-    alert('部门日常管理任务需要输出物评分后才能完成。请先提交输出物并完成评分审核。')
-    return
-  }
-  if (!confirm('已提交输出物并完成评分，确认标记此任务为完成？')) return
+  if (!confirm('确认标记此任务为完成？')) return
   try {
-    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务完成（已评分审核）' })
+    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '部门日常管理任务完成（免审核）' })
     task.value = data.task
   } catch (e) {
     alert(e.message)
@@ -1278,6 +1276,23 @@ onMounted(loadTask)
   border: 1px solid #87e8de; border-radius: 6px; padding: 8px 10px;
   margin-bottom: 12px; line-height: 1.6;
 }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary { background: var(--primary-gradient); border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,119,255,.24); }
+.btn-primary:hover:not(:disabled) { background: #4096ff; box-shadow: 0 4px 14px rgba(22,119,255,.32); }
+.progress-bar { background: #eef0f3; }
+.empty-state { color: var(--text-secondary); }
+.form-select:hover { border-color: #c9cdd4; }
+.form-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.form-textarea:hover { border-color: #c9cdd4; }
+.form-textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>
 
 

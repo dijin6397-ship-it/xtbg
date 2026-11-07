@@ -76,7 +76,10 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background:
+    radial-gradient(1100px 520px at 12% -10%, rgba(22, 119, 255, 0.22), transparent 60%),
+    radial-gradient(900px 480px at 100% 110%, rgba(64, 150, 255, 0.20), transparent 55%),
+    linear-gradient(135deg, #0b2f66 0%, #12457f 55%, #1677ff 100%);
   padding: 20px;
 }
 .login-card {
@@ -85,7 +88,13 @@ async function handleLogin() {
   padding: 48px 40px;
   width: 400px;
   max-width: 100%;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 24px 64px rgba(3, 22, 48, 0.32);
+  animation: loginIn 0.32s ease both;
+}
+@keyframes loginIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
 }
 .login-header {
   text-align: center;
@@ -142,18 +151,21 @@ async function handleLogin() {
 .btn-login {
   width: 100%;
   height: 44px;
-  background: #1677ff;
+  background: linear-gradient(135deg, #1677ff 0%, #3c9ae8 100%);
   color: #fff;
   border: none;
   border-radius: 8px;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  box-shadow: 0 4px 14px rgba(22, 119, 255, 0.32);
+  transition: background 0.2s, box-shadow 0.2s, transform 0.12s;
 }
 .btn-login:hover:not(:disabled) {
   background: #4096ff;
+  box-shadow: 0 6px 18px rgba(22, 119, 255, 0.38);
 }
+.btn-login:active:not(:disabled) { transform: translateY(1px); }
 .btn-login:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -167,4 +179,8 @@ async function handleLogin() {
   color: #c9cdd4;
   margin: 0;
 }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.form-input:hover { border-color: #c9cdd4; }
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>

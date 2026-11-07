@@ -78,4 +78,17 @@ onMounted(loadData)
 .type-warn { color: #ff4d4f; background: #fff2f0; }
 .type-escalate { color: #722ed1; background: #f9f0ff; }
 @media (max-width: 768px) { .stats-row { grid-template-columns: 1fr; } }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.stat-card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: box-shadow .2s ease, transform .2s ease; }
+.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.data-table { font-size: 13px; }
+.data-table th { background: #fafbfc; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.data-table td { border-bottom: 1px solid var(--divider); }
+.data-table tbody tr { transition: background .15s ease; }
+.data-table tbody tr:hover { background: #f7f9fc; }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.empty-state { color: var(--text-secondary); }
 </style>

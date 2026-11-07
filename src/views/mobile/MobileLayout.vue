@@ -67,13 +67,18 @@ const tabs = computed(() => [
   background: var(--bg);
 }
 .mobile-header {
+  position: sticky;
+  top: 0;
+  z-index: 120;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   padding: 8px 16px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: saturate(180%) blur(12px);
   border-bottom: 1px solid var(--border);
 }
+.tab-icon { display: flex; align-items: center; justify-content: center; }
 .mobile-logo {
   height: 32px;
   object-fit: contain;

@@ -120,4 +120,11 @@ onMounted(() => {
 .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 .tab-icon { display: inline-flex; align-items: center; }
 .tab-panel { display: block; }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.page-header { background: linear-gradient(135deg, #1677ff 0%, #4096ff 100%); color: #fff; border-bottom: none; box-shadow: 0 6px 18px rgba(22,119,255,.22); }
+.page-header h2 { color: #fff; }
+.summary { color: rgba(255,255,255,.85); }
 </style>

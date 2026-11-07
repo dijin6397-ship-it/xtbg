@@ -99,7 +99,8 @@ const statusFilters = [
   { key: 'feedback', label: '反馈中' },
   { key: 'review', label: '待验收' },
   { key: 'overdue', label: '已逾期' },
-  { key: 'completed', label: '已完成' }
+  { key: 'completed', label: '已完成' },
+  { key: 'cancelled', label: '已撤回' }
 ]
 
 const priorityFilters = [

@@ -234,4 +234,15 @@ onMounted(async () => { await Promise.all([loadUsers(), loadCategories()]); awai
 .m-row-item:last-child { border-bottom: none; }
 
 .summary-card { background: var(--primary); border-radius: var(--radius); }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.summary-card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: box-shadow .2s ease, transform .2s ease; }
+.summary-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary { background: var(--primary-gradient); border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,119,255,.24); }
+.btn-primary:hover:not(:disabled) { background: #4096ff; box-shadow: 0 4px 14px rgba(22,119,255,.32); }
 </style>

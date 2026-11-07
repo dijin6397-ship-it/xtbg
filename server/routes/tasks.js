@@ -554,6 +554,9 @@ router.post('/', authMiddleware, (req, res) => {
 
   if (task_type === 'key_work' && assignee_id) {
     db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, assignee_id])
+  } else if (task_type === 'daily_management') {
+    // 部门日常管理任务：发起人即为执行人，自动加入执行人列表
+    db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, publisherId])
   } else if (assignee_ids && Array.isArray(assignee_ids)) {
     for (const uid of assignee_ids) {
       db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, uid])
@@ -875,6 +878,13 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
     return res.status(403).json({ error: '权限不足：只有执行人可以提交输出物' })
   }
 
+  // 提交前先取任务信息：部门日常管理任务据此判定是否免审核
+  const infoStmt = db.prepare('SELECT task_type, status, publisher_id FROM tasks WHERE id = ?')
+  infoStmt.bind([id])
+  const tInfo = infoStmt.step() ? infoStmt.getAsObject() : null
+  infoStmt.free()
+  const isDailyManagement = !!(tInfo && tInfo.task_type === 'daily_management')
+
   // Resolve rule + reference score from the chosen L3 entry
   const ruleStmt = db.prepare('SELECT score_rule, score_value, score_upper FROM dict_categories WHERE id = ?')
   ruleStmt.bind([category_l3])
@@ -888,7 +898,8 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
   let sVal = Number(score_value || 0)
   let sQty = Number(score_quantity || 0)
   let sTotal = 0
-  const outputStatus = 'pending'
+  // 部门日常管理任务免审核：输出物直接视为已通过
+  const outputStatus = isDailyManagement ? 'approved' : 'pending'
   const selfScored = !!(score_value !== undefined && score_value !== null && sVal > 0)
 
   if (selfScored) {
@@ -921,34 +932,30 @@ router.post('/:id/submit-output', authMiddleware, (req, res) => {
     resolvedSubtaskId = subtask?.id || null
   }
 
-  // Insert output with self-score data (if provided). reviewer_id 留空，等待主管审核。
+  // 插入输出物：日常管理免审核，直接记录审核人与审核时间
   db.run(`
     INSERT INTO task_outputs (task_id, subtask_id, user_id, content, category_l1, category_l2, category_l3, score_rule, status, score_value, score_quantity, score_total, reviewer_id, reviewed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-  `, [id, resolvedSubtaskId, userId, content, category_l1, category_l2, category_l3, rule.score_rule || 'fixed', outputStatus, sVal, sQty, sTotal, null])
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [id, resolvedSubtaskId, userId, content, category_l1, category_l2, category_l3, rule.score_rule || 'fixed', outputStatus, sVal, sQty, sTotal,
+      isDailyManagement ? userId : null,
+      isDailyManagement ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null])
 
-  const submitLabel = selfScored
-    ? `提交输出物（自评 ${sVal} × ${sQty} = ${sTotal}，待主管审核）: ${content}`
-    : `提交输出物: ${content}`
+  const submitLabel = isDailyManagement
+    ? `提交输出物（部门日常管理任务免审核，任务已完成）: ${content}`
+    : selfScored
+      ? `提交输出物（自评 ${sVal} × ${sQty} = ${sTotal}，待主管审核）: ${content}`
+      : `提交输出物: ${content}`
   db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "output", ?)',
     [id, userId, submitLabel])
 
-  // Check task info
-  const taskRow = db.prepare('SELECT task_type, status, publisher_id FROM tasks WHERE id = ?')
-  taskRow.bind([id])
-  const tInfo = taskRow.step() ? taskRow.getAsObject() : null
-  taskRow.free()
-
-  if (tInfo && tInfo.task_type === 'daily_management' && tInfo.status !== 'review') {
-    // Daily management: do NOT auto-complete. Keep task in_progress.
-    // The submitter must manually click "complete" after self-reviewing all outputs.
-    // (Previously this auto-completed for staff/supervisor roles — removed per requirement.)
+  if (isDailyManagement) {
+    // 部门日常管理任务：发起人提交输出物后直接完成，无需主管指派与审核
+    db.run('UPDATE tasks SET status = "completed", progress = 100, completed_at = datetime("now","localtime"), updated_at = datetime("now","localtime") WHERE id = ?', [id])
+    db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "approved", ?)',
+      [id, userId, '部门日常管理任务免审核，提交输出物后自动完成'])
   } else if (tInfo && tInfo.status === 'overdue') {
-    // 逾期任务：提交输出物后进入待验收，由领导/管理员复核
     db.run('UPDATE tasks SET status = "review", updated_at = datetime("now","localtime") WHERE id = ?', [id])
   }
-  // 说明：项目任务与部门重点工作均为「谁发起谁审核」，提交输出物后保持进行中，
-  // 由发起人在任务详情中审核评分；子任务全部完成并通过审核后任务自动完成。
 
   const task = getFullTask(db, id)
   res.json({ task })
@@ -1323,17 +1330,18 @@ router.put('/:id/recall', authMiddleware, (req, res) => {
   const task = getFullTask(db, id)
   if (!task) return res.status(404).json({ error: '任务不存在' })
 
-  if (task.status !== 'pending' && task.status !== 'decomposing') {
-    return res.status(400).json({ error: '只能撤回待开始或分解中的任务' })
+  // 部门日常管理发布后直接进入执行，允许发起人撤回
+  const isDailyInProgress = task.task_type === 'daily_management' && task.status === 'in_progress'
+  if (task.status !== 'pending' && task.status !== 'decomposing' && !isDailyInProgress) {
+    return res.status(400).json({ error: '只能撤回待开始、分解中或进行中的部门日常管理任务' })
   }
 
+  // 仅任务发起人可撤回（部门重点任务 / 项目任务 / 部门日常管理任务规则一致）
   const uid = req.user.id
-  const isPublisher = task.publisher_id === uid
-  const isSupervisor = task.supervisor_id === uid
-  const isAdmin = ['admin', 'leader'].includes(req.user.role)
+  const isPublisher = Number(task.publisher_id) === Number(uid)
 
-  if (!isPublisher && !isSupervisor && !isAdmin) {
-    return res.status(403).json({ error: '权限不足，仅发起人、主管或管理员可撤回任务' })
+  if (!isPublisher) {
+    return res.status(403).json({ error: '权限不足，只有任务发起人可以撤回该任务' })
   }
 
   db.run('UPDATE tasks SET status = "cancelled", updated_at = datetime("now","localtime") WHERE id = ?', [id])

@@ -50,6 +50,9 @@
 
       <!-- Self-scoring section -->
       <div class="form-group" v-if="selectedL3Info">
+        <div v-if="task.task_type === 'daily_management'" style="font-size: 12px; color: var(--text-secondary); background: #f7f9fc; border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; line-height: 1.6">
+          部门日常管理任务免审核：提交后任务直接完成，此处填写的分值将作为最终得分。
+        </div>
         <label class="form-label">自行评分 *</label>
         <div class="score-rule-hint">
           <span class="tag" :class="'rule-' + (selectedL3Info.scoreRule || 'fixed')">{{ ruleLabel(selectedL3Info.scoreRule) }}</span>
@@ -325,4 +328,9 @@ onMounted(loadTask)
 .output-status-pending { color: #fa8c16; background: #fff7e6; }
 .output-status-approved { color: #52c41a; background: #f6ffed; }
 .output-status-rejected { color: #ff4d4f; background: #fff2f0; }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.form-textarea:hover { border-color: #c9cdd4; }
+.form-textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>

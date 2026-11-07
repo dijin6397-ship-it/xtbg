@@ -184,7 +184,7 @@
     <div class="m-action-bar">
       <button v-if="task.status === 'pending' && task.task_type !== 'key_work' && task.task_type !== 'daily_management' && canDistribute" class="btn btn-primary" @click="goDecompose">任务分解</button>
       <button v-if="task.status === 'decomposing' && canManageSubtasks" class="btn btn-primary" @click="goDecompose">添加子任务</button>
-      <button v-if="(task.status === 'pending' || task.status === 'decomposing') && canRecall" class="btn btn-warning" @click="handleRecallTask">撤回任务</button>
+      <button v-if="canRecall" class="btn btn-warning" @click="handleRecallTask">撤回任务</button>
       <template v-if="task.status === 'in_progress'">
         <button class="btn btn-outline" style="flex: 1" @click="showUrgePanel = true">催办</button>
         <button v-if="canSubmitOutput" class="btn btn-primary" style="flex: 1" @click="goFeedback">
@@ -311,22 +311,27 @@ function ruleLabel(rule) {
 
 const canRecall = computed(() => {
   if (!task.value) return false
-  if (task.value.status !== 'pending' && task.value.status !== 'decomposing') return false
+  // 仅任务发起人可撤回
   const uid = authStore.user?.id
-  return task.value.publisher_id === uid || 
-    task.value.supervisor_id === uid ||
-    ['admin', 'leader'].includes(authStore.user?.role)
+  if (uid == null) return false
+  // 移动端任务来自本地 store，发布者可能只有 publisher 对象，需兼容两种字段
+  const pid = task.value.publisher_id != null ? task.value.publisher_id : task.value.publisher?.id
+  if (Number(pid) !== Number(uid)) return false
+  // 部门日常管理发布后直接进入执行，允许发起人撤回
+  if (task.value.task_type === 'daily_management') return task.value.status === 'in_progress'
+  return task.value.status === 'pending' || task.value.status === 'decomposing'
 })
 
+// 部门日常管理：免指派、免审核，发起人提交输出物后后端自动完成
+// 仅兼容历史数据（已有输出物却仍停留在进行中）时提供手动完成
 const canDailyComplete = computed(() => {
   if (!task.value) return false
   if (task.value.task_type !== 'daily_management') return false
   if (task.value.status !== 'in_progress') return false
   if (!task.value.outputs?.length) return false
-  const hasPending = task.value.outputs.some(o => o.status === 'pending')
-  if (hasPending) return false
-  const hasScored = task.value.outputs.some(o => o.scoreValue > 0)
-  return hasScored
+  const uid = authStore.user?.id
+  const pid = task.value.publisher_id != null ? task.value.publisher_id : task.value.publisher?.id
+  return Number(pid) === Number(uid) || authStore.user?.role === 'admin'
 })
 
 const canRecallOutput = (output) => {
@@ -438,9 +443,9 @@ async function handleRecallOutput(outputId) {
 
 async function handleDailyComplete() {
   if (!task.value) return
-  if (!confirm('已提交输出物并完成评分，确认标记此任务为完成？')) return
+  if (!confirm('确认标记此任务为完成？')) return
   try {
-    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '日常管理任务完成（已评分审核）' })
+    const data = await taskAPI.approveFinal(task.value.id, { approved: true, comment: '部门日常管理任务完成（免审核）' })
     const idx = store.tasks.findIndex(t => t.id === task.value.id)
     if (idx >= 0) store.tasks[idx] = data.task
   } catch (e) {

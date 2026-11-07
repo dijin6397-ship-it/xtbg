@@ -153,6 +153,7 @@
                 <router-link :to="`/admin/task/${task.id}`" class="btn btn-sm">查看</router-link>
                 <router-link v-if="canEditTask(task)" :to="`/admin/task/${task.id}`" class="btn btn-sm btn-edit">编辑</router-link>
                 <button v-if="canDelete" class="btn btn-sm btn-danger" @click="handleDelete(task.id)">删除</button>
+                <button v-if="canRecallTask(task)" class="btn btn-sm btn-warning" @click="handleRecall(task.id)">撤回</button>
               </td>
             </tr>
           </tbody>
@@ -195,7 +196,8 @@ const statusMap = {
   feedback: { label: '反馈中', color: '#13c2c2', bg: '#e6fffb' },
   review: { label: '待审核', color: '#fa8c16', bg: '#fff7e6' },
   completed: { label: '已完成', color: '#52c41a', bg: '#f6ffed' },
-  overdue: { label: '已逾期', color: '#ff4d4f', bg: '#fff2f0' }
+  overdue: { label: '已逾期', color: '#ff4d4f', bg: '#fff2f0' },
+  cancelled: { label: '已撤回', color: '#8c8c8c', bg: '#f5f5f5' }
 }
 
 const tasks = ref([])
@@ -390,6 +392,26 @@ function exportExcel() {
 }
 
 
+// 撤回入口：仅任务发起人本人可见（领导 / 主管 / 管理员均不可撤回他人任务）
+function canRecallTask(task) {
+  const uid = authStore.user?.id
+  if (!uid || Number(task.publisher?.id) !== Number(uid)) return false
+  if (task.status === 'cancelled' || task.status === 'completed') return false
+  // 部门日常管理发布后直接进入执行，允许发起人撤回
+  if (task.task_type === 'daily_management') return task.status === 'in_progress'
+  return task.status === 'pending' || task.status === 'decomposing'
+}
+
+async function handleRecall(taskId) {
+  if (!confirm('确认要撤回此任务吗？此操作不可恢复。')) return
+  try {
+    await taskAPI.recall(taskId)
+    await loadTasks()
+  } catch (e) {
+    alert(e.message || '撤回失败')
+  }
+}
+
 async function handleDelete(taskId) {
   if (!confirm('确定要删除此任务吗？此操作不可恢复。')) return
   try {
@@ -407,6 +429,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.btn-warning { background: #faad14; color: #fff; border-color: #faad14; }
+.btn-warning:hover:not(:disabled) { background: #ffc53d; }
 .task-list-page { display: flex; flex-direction: column; gap: 20px; }
 .page-header { display: flex; align-items: baseline; gap: 12px; background: #fff; color: #000; padding: 16px 16px 20px; border-radius: var(--radius); margin-bottom: 8px; border-bottom: 1px solid var(--border); }
 .page-header h2 { font-size: 20px; font-weight: 600; color: #000; margin: 0; }
@@ -508,6 +532,28 @@ onMounted(() => {
 .import-errors li { font-size: 12px; color: var(--text); line-height: 1.8; }
 .import-errors .err-row { color: #ff4d4f; margin-right: 8px; white-space: nowrap; }
 .import-all-ok { margin: 12px 0 0; font-size: 13px; color: #52c41a; }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.data-table { font-size: 13px; }
+.data-table th { background: #fafbfc; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.data-table td { border-bottom: 1px solid var(--divider); }
+.data-table tbody tr { transition: background .15s ease; }
+.data-table tbody tr:hover { background: #f7f9fc; }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.progress-bar { background: #eef0f3; }
+.form-select:hover { border-color: #c9cdd4; }
+.form-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.search-box { transition: border-color .18s, box-shadow .18s; }
+.search-box:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.page-header { background: linear-gradient(135deg, #1677ff 0%, #4096ff 100%); color: #fff; border-bottom: none; box-shadow: 0 6px 18px rgba(22,119,255,.22); }
+.page-header h2 { color: #fff; }
+.summary { color: rgba(255,255,255,.85); }
 </style>
 
 

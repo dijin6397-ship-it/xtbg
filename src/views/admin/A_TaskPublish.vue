@@ -210,22 +210,24 @@
                 <div class="flow-content">
                   <div class="flow-label">发起人</div>
                   <div class="flow-value">{{ authStore.user?.name }}</div>
+                  <div class="flow-note">全员可发起，无需主管指派</div>
                 </div>
               </div>
               <div class="flow-line"></div>
               <div class="flow-step">
                 <div class="flow-dot"></div>
                 <div class="flow-content">
-                  <div class="flow-label">自行管理</div>
-                  <div class="flow-value">按类别执行任务</div>
+                  <div class="flow-label">直接执行</div>
+                  <div class="flow-value">发布后即进入执行</div>
                 </div>
               </div>
               <div class="flow-line"></div>
               <div class="flow-step">
                 <div class="flow-dot final"></div>
                 <div class="flow-content">
-                  <div class="flow-label">反馈输出物</div>
-                  <div class="flow-value">自行反馈完成</div>
+                  <div class="flow-label">提交输出物</div>
+                  <div class="flow-value">提交后任务自动完成</div>
+                  <div class="flow-note">免审核，无需主管评分</div>
                 </div>
               </div>
             </template>
@@ -273,7 +275,7 @@ const flowTypes = [
     roles: ['admin', 'leader']
   },
   {
-    value: 'daily_management', label: '部门日常管理', desc: '全员可发起，按类别管理',
+    value: 'daily_management', label: '部门日常管理', desc: '全员可发起，无需指派，提交输出物即完成',
     bg: '#fffbe6', color: '#faad14',
     icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
     roles: ['admin', 'leader', 'supervisor', 'staff_tech', 'staff_quality']
@@ -485,4 +487,18 @@ onMounted(async () => {
   .publish-form { grid-template-columns: 1fr; }
   .dict-grid { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary { background: var(--primary-gradient); border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,119,255,.24); }
+.btn-primary:hover:not(:disabled) { background: #4096ff; box-shadow: 0 4px 14px rgba(22,119,255,.32); }
+.form-input:hover { border-color: #c9cdd4; }
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.form-textarea:hover { border-color: #c9cdd4; }
+.form-textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>

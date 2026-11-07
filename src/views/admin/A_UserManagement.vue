@@ -454,4 +454,26 @@ onMounted(() => {
   cursor: pointer;
 }
 .perm-empty { font-size: 12px; color: var(--text-secondary); }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.data-table { font-size: 13px; }
+.data-table th { background: #fafbfc; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.data-table td { border-bottom: 1px solid var(--divider); }
+.data-table tbody tr { transition: background .15s ease; }
+.data-table tbody tr:hover { background: #f7f9fc; }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary { background: var(--primary-gradient); border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,119,255,.24); }
+.btn-primary:hover:not(:disabled) { background: #4096ff; box-shadow: 0 4px 14px rgba(22,119,255,.32); }
+.form-input:hover { border-color: #c9cdd4; }
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.form-select:hover { border-color: #c9cdd4; }
+.form-select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.search-box { transition: border-color .18s, box-shadow .18s; }
+.search-box:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>

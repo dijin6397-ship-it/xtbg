@@ -64,6 +64,9 @@
       <!-- Self-scoring section -->
       <div class="form-group" v-if="selectedL3Info">
         <label class="form-label">自行评分 <span class="required">*</span></label>
+        <div v-if="task.task_type === 'daily_management'" class="hint-line" style="margin-bottom:8px">
+          部门日常管理任务免审核：提交后任务直接完成，此处填写的分值将作为最终得分。
+        </div>
         <div class="score-rule-hint">
           <span class="tag" :class="'rule-' + (selectedL3Info.scoreRule || 'fixed')">{{ ruleLabel(selectedL3Info.scoreRule) }}</span>
           <span v-if="selectedL3Info.scoreRule === 'fixed'" class="rule-text">参考分值 ≤ {{ selectedL3Info.scoreValue }}</span>
@@ -481,4 +484,21 @@ onMounted(loadTask)
   padding: 0 12px; font-size: 14px; color: var(--text); outline: none;
   box-sizing: border-box; background: #fff;
 }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.btn { user-select: none; transition: background .18s, border-color .18s, box-shadow .18s, color .18s, transform .12s; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(22,119,255,.28); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary { background: var(--primary-gradient); border-color: var(--primary); box-shadow: 0 2px 8px rgba(22,119,255,.24); }
+.btn-primary:hover:not(:disabled) { background: #4096ff; box-shadow: 0 4px 14px rgba(22,119,255,.32); }
+.progress-bar { background: #eef0f3; }
+.empty-state { color: var(--text-secondary); }
+.form-input:hover { border-color: #c9cdd4; }
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+.form-textarea:hover { border-color: #c9cdd4; }
+.form-textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
 </style>

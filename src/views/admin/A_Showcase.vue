@@ -95,4 +95,10 @@ onMounted(async () => {
 .tc-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-caption); }
 .empty-wall { text-align: center; color: var(--text-caption); font-size: 13px; padding: 20px; }
 @media (max-width: 768px) { .overview-card { flex-direction: column; align-items: flex-start; } .overview-stats { flex-wrap: wrap; gap: 20px; } }
+
+/* UI-POLISH: 统一设计语言（覆盖本页重写的全局类） */
+.card { border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.card:hover { box-shadow: var(--shadow-md); }
+.tag { white-space: nowrap; letter-spacing: .2px; }
+.progress-bar { background: #eef0f3; }
 </style>
