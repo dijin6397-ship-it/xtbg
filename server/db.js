@@ -365,7 +365,23 @@ export function saveDB() {
   if (!db) return
   const data = db.export()
   const buffer = Buffer.from(data)
-  fs.writeFileSync(DB_PATH, buffer)
+  const tmp = DB_PATH + '.tmp'
+  const fd = fs.openSync(tmp, 'w')
+  try {
+    let off = 0
+    while (off < buffer.length) {
+      off += fs.writeSync(fd, buffer, off, buffer.length - off)
+    }
+    fs.fsyncSync(fd)
+  } finally {
+    fs.closeSync(fd)
+  }
+  fs.renameSync(tmp, DB_PATH)
+  try {
+    const dfd = fs.openSync(path.dirname(DB_PATH), 'r')
+    fs.fsyncSync(dfd)
+    fs.closeSync(dfd)
+  } catch (e) { /* dir fsync best-effort */ }
 }
 
 export function seedIfEmpty() {

@@ -23,6 +23,23 @@ const PORT = process.env.PORT || 3001
 app.use(cors())
 app.use(express.json({ limit: '30mb' }))
 
+// 写请求落盘中间件：任何非 GET/HEAD/OPTIONS 请求处理完毕后立即持久化到磁盘
+// 修复：原代码仅在启动/优雅退出/健康检查时 saveDB，业务写入只停留内存，断电即丢
+const persistMiddleware = (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next()
+  let persisted = false
+  const persist = () => {
+    if (persisted) return
+    persisted = true
+    if (res.statusCode >= 500) return
+    try { saveDB() } catch (e) { console.error('[persist] saveDB failed:', e && e.message) }
+  }
+  res.on('finish', persist)
+  res.on('close', persist)
+  next()
+}
+app.use(persistMiddleware)
+
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/tasks', taskRoutes)
