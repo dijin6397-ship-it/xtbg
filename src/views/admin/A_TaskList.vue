@@ -169,10 +169,9 @@ import { taskAPI, userAPI, taskImportAPI, wbsAPI } from '../../api/index.js'
 import { taskTypeMap, authStore, canImportTasks } from '../../store/auth.js'
 
 const canDelete = computed(() => {
-  // Only the task publisher can delete the task
-  const uid = authStore.user?.id
-  if (!uid) return false
-  return false // Role-based deletion removed; only publisher can delete via detail page
+  // 管理员 / 领导 / 主管可在列表页删除任务（与后端 DELETE /api/tasks/:id 的 isAdmin 放行一致）
+  const role = authStore.user?.role
+  return ['admin', 'leader', 'supervisor'].includes(role)
 })
 
 // 编辑入口：仅任务发起人本人（或管理员）可见——谁发起谁修改

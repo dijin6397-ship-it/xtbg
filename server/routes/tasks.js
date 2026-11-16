@@ -1367,9 +1367,11 @@ router.delete('/:id', authMiddleware, (req, res) => {
     return res.status(404).json({ error: '任务不存在' })
   }
 
-  // Only the task publisher can delete the task
-  if (Number(row.publisher_id) !== Number(userId)) {
-    return res.status(403).json({ error: '权限不足，只有任务发起人可以删除该任务' })
+  // 任务发起人或系统管理员可删除
+  const isPublisher = Number(row.publisher_id) === Number(userId)
+  const isAdmin = req.user.role === 'admin'
+  if (!isPublisher && !isAdmin) {
+    return res.status(403).json({ error: '权限不足，只有任务发起人或管理员可以删除该任务' })
   }
 
   db.run('DELETE FROM feedbacks WHERE task_id = ?', [id])

@@ -599,7 +599,9 @@ const canUrgeSubtask = computed(() => canSupervise.value || (isPublisherFlow.val
 
 
 const canDelete = computed(() => {
-  // Only the task publisher can delete the task
+  // 任务发起人本人，或系统管理员均可删除
+  const role = authStore.user?.role
+  if (role === 'admin') return true
   const uid = authStore.user?.id
   if (!task.value || !uid) return false
   return Number(task.value.publisher_id) === Number(uid)
