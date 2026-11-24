@@ -151,6 +151,23 @@ export const moduleAPI = {
 export const dictionaryAPI = {
   list: () => request('/dictionary'),
   tree: () => request('/dictionary/tree'),
+  importTemplateUrl: () => `${BASE}/dictionary/import-template`,
+  async downloadImportTemplate() {
+    const token = getToken()
+    const res = await fetch(`${BASE}/dictionary/import-template`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (!res.ok) {
+      let message = '模板下载失败'
+      try { message = (await res.json()).error || message } catch (error) {}
+      throw new Error(message)
+    }
+    return res.blob()
+  },
+  import: (fileBase64) => request('/dictionary/import', {
+    method: 'POST',
+    body: JSON.stringify({ fileBase64 })
+  }),
   byLevel: (level, parentId) => {
     const qs = parentId ? `?parentId=${parentId}` : ''
     return request(`/dictionary/level/${level}${qs}`)

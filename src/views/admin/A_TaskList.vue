@@ -106,6 +106,7 @@
               <th>主管</th>
               <th>进度</th>
               <th>截止日期</th>
+              <th>子任务分配</th>
               <th>实际完成日期</th>
               <th>操作</th>
             </tr>
@@ -148,6 +149,14 @@
                 </div>
               </td>
               <td>{{ task.deadline }}</td>
+              <td class="cell-content">
+                <span v-if="task.subtasks?.length">
+                  <div v-for="sub in task.subtasks" :key="sub.id" class="subtask-cell">
+                    {{ sub.title }}｜{{ sub.assignee?.name || '未分配' }}｜{{ sub.deadline || '未设置' }}
+                  </div>
+                </span>
+                <span v-else class="cell-empty">-</span>
+              </td>
               <td>{{ task.completed_at || '-' }}</td>
               <td>
                 <router-link :to="`/admin/task/${task.id}`" class="btn btn-sm">查看</router-link>
@@ -362,7 +371,7 @@ async function handleImportFile(event) {
 }
 
 function exportExcel() {
-  const headers = ['ID', '任务标题', '类型', '优先级', '状态', '发起人', '项目号(WBS)', '车号', '主管', '进度', '截止日期', '实际完成日期']
+  const headers = ['ID', '任务标题', '类型', '优先级', '状态', '发起人', '项目号(WBS)', '车号', '主管', '进度', '截止日期', '子任务分配', '实际完成日期']
   const rows = filteredTasks.value.map(t => [
     t.id,
     t.title,
@@ -375,6 +384,7 @@ function exportExcel() {
     t.supervisor?.name || '',
     t.progress + '%',
     t.deadline || '',
+    (t.subtasks || []).map(s => `${s.title}|${s.assignee?.name || '未分配'}|${s.deadline || '未设置'}`).join('；'),
     t.completed_at || ''
   ])
 
@@ -465,6 +475,8 @@ onMounted(() => {
 .cell-id { color: var(--text-secondary); font-family: monospace; }
 .cell-title { font-weight: 500; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-empty { color: var(--text-caption); }
+.cell-content { min-width: 220px; max-width: 320px; }
+.subtask-cell { white-space: normal; line-height: 1.5; }
 .cell-wbs { max-width: 180px; }
 .wbs-tag {
   display: inline-block; padding: 2px 8px; border-radius: 4px;

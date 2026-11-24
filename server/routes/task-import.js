@@ -49,6 +49,7 @@ const TEMPLATE_COLUMNS = [
   { key: 'wbs_car', header: '车号', hint: '可多选，四位数字，多个用、分隔，如 0289、0290' },
   { key: 'supervisor', header: '主管', hint: '主管姓名，留空则默认为发起人本人（谁发起谁审核）' },
   { key: 'assignees', header: '责任人', hint: '多个用、分隔，如 杨晨、曹毅峰' },
+  { key: 'subtask_assignments', header: '子任务分配', hint: '多个用；或;分隔，每个子任务格式：标题|执行人|截止日期（如 设备点检|杨晨|2026-06-30）' },
   { key: 'management_category', header: '管理类别', hint: '仅部门日常管理任务需要，如 固资/安全/合同' },
   { key: 'management_detail', header: '其他说明', hint: '管理类别选择“其他”时填写' }
 ]
@@ -113,6 +114,22 @@ function findUserByName(db, name) {
   return row
 }
 
+function parseSubtaskAssignments(raw) {
+  return String(raw || '')
+    .split(/[;；]+/)
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .map(item => {
+      const parts = item.split('|').map(part => String(part || '').trim())
+      return {
+        title: parts[0] || '',
+        assignee: parts[1] || '',
+        deadline: normalizeDate(parts[2] || '')
+      }
+    })
+    .filter(item => item.title)
+}
+
 function resolveWbsByText(db, text, level, parentId) {
   const raw = String(text || '').trim()
   if (!raw) return []
@@ -168,6 +185,7 @@ router.get('/template', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPOR
     '',
     '',
     '',
+    '设备点检|杨晨|2026-06-30；资料归档|曹毅峰|2026-06-30',
     '安全',
     ''
   ]
@@ -228,6 +246,7 @@ router.post('/import', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPORT
   }
 
   const db = getDB()
+
   const userRole = req.user.role
   const publisherId = req.user.id
   const importBatch = 'IMP' + Date.now()
@@ -257,6 +276,25 @@ router.post('/import', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPORT
     if (!taskType) {
       errors.push({ row: rowNo, message: `任务类型无法识别：「${typeLabel}」，可选：自主修/问题整改/现场质量问题分析/部门重点工作/部门日常管理` })
       return
+    }
+
+    const parsedSubtasks = parseSubtaskAssignments(get('subtask_assignments'))
+    const hasAssignmentText = Boolean(String(get('subtask_assignments') || '').trim())
+    if (hasAssignmentText && parsedSubtasks.length === 0) {
+      errors.push({ row: rowNo, message: '子任务分配格式无效，应为：标题|执行人|截止日期' })
+      return
+    }
+    for (const sub of parsedSubtasks) {
+      const user = findUserByName(db, sub.assignee)
+      if (!user) {
+        errors.push({ row: rowNo, message: `子任务「${sub.title}」执行人「${sub.assignee || '未填写'}」不存在或已禁用` })
+        return
+      }
+      if (!sub.deadline) {
+        errors.push({ row: rowNo, message: `子任务「${sub.title}」截止日期无效，格式 YYYY-MM-DD` })
+        return
+      }
+      sub.assignee_id = user.id
     }
     if (!allowedTaskTypes.includes(taskType)) {
       errors.push({ row: rowNo, message: `当前角色（${userRole}）无权发起「${taskTypeLabels[taskType]}」任务` })
@@ -373,6 +411,11 @@ router.post('/import', authMiddleware, requirePermission(PERMISSIONS.TASK_IMPORT
       // 实际执行人以后续新增的子任务指派为准）
       for (const uid of assigneeIds) {
         db.run('INSERT OR IGNORE INTO task_assignees (task_id, user_id) VALUES (?, ?)', [id, uid])
+      }
+
+      for (const sub of parsedSubtasks) {
+        db.run('INSERT INTO subtasks (task_id, title, assignee_id, deadline) VALUES (?, ?, ?, ?)',
+          [id, sub.title, sub.assignee_id, sub.deadline])
       }
 
       db.run('INSERT INTO feedbacks (task_id, user_id, type, content) VALUES (?, ?, "import", ?)',

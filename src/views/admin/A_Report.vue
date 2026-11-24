@@ -1,7 +1,7 @@
 <template>
   <div class="report-page">
     <h2 class="page-title">报表统计</h2>
-    <p class="page-desc">按人员、一/二/三级分类、输出物、时间跨度等维度查询与统计</p>
+    <p class="page-desc">全量任务报表：按子任务展开，未提交输出物的任务同样进入明细</p>
 
     <!-- Filters -->
     <div class="card filter-card">
@@ -35,8 +35,8 @@
           </select>
         </div>
         <div class="filter-item">
-          <label class="filter-label">输出物关键字</label>
-          <input v-model="filters.keyword" class="form-input" placeholder="按输出物内容搜索" />
+          <label class="filter-label">关键字</label>
+          <input v-model="filters.keyword" class="form-input" placeholder="按任务描述或输出物内容搜索" />
         </div>
         <div class="filter-item">
           <label class="filter-label">状态</label>
@@ -67,7 +67,7 @@
     <div class="summary-grid">
       <div class="card summary-card">
         <div class="summary-value">{{ summary.totalCount }}</div>
-        <div class="summary-label">输出物总数</div>
+        <div class="summary-label">任务明细总数</div>
       </div>
       <div class="card summary-card">
         <div class="summary-value">{{ summary.grandTotal }}</div>
@@ -129,11 +129,11 @@
     <!-- Detail Table -->
     <div class="card table-card">
       <div class="table-header">
-        <h3>明细列表 ({{ rows.length }})</h3>
+        <h3>全量任务明细 ({{ rows.length }})</h3>
       </div>
       <div v-if="loading" class="loading-state">加载中...</div>
       <div v-else-if="rows.length === 0" class="empty-state">
-        <p>未找到匹配的输出物</p>
+        <p>未找到匹配的任务明细</p>
       </div>
       <div v-else class="table-wrap">
         <table class="data-table">
@@ -141,6 +141,11 @@
             <tr>
               <th>ID</th>
               <th>任务标题</th>
+              <th>任务描述</th>
+              <th>日常管理子分类</th>
+              <th>子任务</th>
+              <th>执行人</th>
+              <th>子任务截止时间</th>
               <th>类型</th>
               <th>发起人</th>
               <th>项目号</th>
@@ -167,6 +172,11 @@
             <tr v-for="r in rows" :key="r.id">
               <td class="cell-id">#{{ r.id }}</td>
               <td class="cell-title">{{ r.taskTitle || '—' }}</td>
+              <td class="cell-content">{{ r.taskDescription || '—' }}</td>
+              <td class="cell-content">{{ managementCategoryText(r) }}</td>
+              <td class="cell-content">{{ r.subtaskTitle || '无子任务' }}</td>
+              <td>{{ r.subtaskAssigneeName || r.userName || '—' }}</td>
+              <td>{{ r.subtaskDeadline || '—' }}</td>
               <td>
                 <span v-if="r.taskType" class="tag" :class="typeTagClass(r.taskType)">{{ typeLabel(r.taskType) }}</span>
                 <span v-else>—</span>
@@ -276,6 +286,14 @@ function formatScore(v) {
   return Math.round((v || 0) * 100) / 100
 }
 
+function managementCategoryText(row) {
+  if (!row.managementCategory) return '—'
+  if (row.managementCategory === '其他' && row.managementDetail) {
+    return `其他：${row.managementDetail}`
+  }
+  return row.managementCategory
+}
+
 // Task type display
 function typeLabel(t) {
   return taskTypeMap[t]?.label || t || ''
@@ -338,7 +356,10 @@ async function loadReport() {
     let detailRows = data.rows || []
     if (filters.keyword) {
       const kw = filters.keyword.toLowerCase()
-      detailRows = detailRows.filter(r => (r.content || '').toLowerCase().includes(kw))
+      detailRows = detailRows.filter(r => {
+        const text = [r.taskTitle, r.taskDescription, r.managementCategory, r.managementDetail, r.subtaskTitle, r.content]
+        return text.some(v => String(v || '').toLowerCase().includes(kw))
+      })
     }
     rows.value = detailRows
     const approvedCount = detailRows.filter(r => r.status === 'approved').length
@@ -362,9 +383,11 @@ async function loadReport() {
 }
 
 function exportExcel() {
-  const headers = ['ID', '任务标题', '类型', '发起人', '项目号', '项目名称', '车号', '开始时间', '截至日期', '状态', '主管', '提交人', '部门', '一级分类', '二级分类', '三级分类', '输出物', '分数', '数量', '总分', '输出状态', '提交时间']
+  const headers = ['ID', '任务标题', '任务描述', '日常管理子分类', '子任务', '执行人', '子任务截止时间', '类型', '发起人', '项目号', '项目名称', '车号', '开始时间', '截至日期', '状态', '主管', '提交人', '部门', '一级分类', '二级分类', '三级分类', '输出物', '分数', '数量', '总分', '输出状态', '提交时间']
   const data = rows.value.map(r => [
-    r.id, r.taskTitle || '', typeLabel(r.taskType), r.publisherName || '',
+    r.id, r.taskTitle || '', r.taskDescription || '', managementCategoryText(r),
+    r.subtaskTitle || '无子任务', r.subtaskAssigneeName || r.userName || '', r.subtaskDeadline || '',
+    typeLabel(r.taskType), r.publisherName || '',
     (r.wbsProjectCodes || []).join('、'),
     (r.wbsProjectNames || []).join('、'),
     (r.wbsCarNames || []).join('、'),
@@ -386,7 +409,7 @@ function exportExcel() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = '输出物报表_' + new Date().toISOString().slice(0, 10) + '.csv'
+  a.download = '全量任务报表_' + new Date().toISOString().slice(0, 10) + '.csv'
   a.click()
   URL.revokeObjectURL(url)
 }

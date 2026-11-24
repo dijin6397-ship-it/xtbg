@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import * as XLSX from 'xlsx'
 import { getDB } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { requireBackendModule } from '../module-access.js'
@@ -23,6 +24,14 @@ function rowToCategory(row) {
     active: row.active === 1,
     createdAt: row.created_at
   }
+}
+
+function categoryByLevelAndName(db, level, name, parentId = null) {
+  const stmt = db.prepare('SELECT * FROM dict_categories WHERE level = ? AND name = ? AND (parent_id IS ? OR parent_id = ?) LIMIT 1')
+  stmt.bind([Number(level), String(name || '').trim(), parentId, parentId])
+  const row = stmt.step() ? stmt.getAsObject() : null
+  stmt.free()
+  return row ? rowToCategory(row) : null
 }
 
 // GET /api/dictionary - list whole tree (flat array with level / parentId)
@@ -145,36 +154,161 @@ router.get('/level/:level', authMiddleware, (req, res) => {
   res.json({ categories: out })
 })
 
-// GET /api/dictionary/report - report aggregation by category + user + time
+// GET /api/dictionary/import-template - three-level category import template
+router.get('/import-template', authMiddleware, requireBackendModule, (req, res) => {
+  const headers = ['一级分类名称', '二级分类名称', '三级分类名称', '分值规则', '分值下限/固定分值', '分值上限']
+  const rows = [
+    ['固资', '设备管理', '设备维修', 'fixed', 3, ''],
+    ['安全', '现场安全', '隐患整改', 'range', 1, 5],
+    ['体系内外审', '内部审核', '', 'fixed', 2, '']
+  ]
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
+  ws['!cols'] = [{ wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 20 }, { wch: 12 }]
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '分类导入')
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  res.setHeader('Content-Disposition', 'attachment; filename="dictionary-import-template.xlsx"')
+  res.send(buf)
+})
+
+// POST /api/dictionary/import - upsert three-level categories
+router.post('/import', authMiddleware, requireBackendModule, (req, res) => {
+  const { fileBase64 } = req.body || {}
+  if (!fileBase64) return res.status(400).json({ error: '请上传 Excel 文件' })
+
+  let workbook
+  try {
+    const buffer = Buffer.from(String(fileBase64).replace(/^data:.*?;base64,/, ''), 'base64')
+    workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true })
+  } catch (error) {
+    return res.status(400).json({ error: 'Excel 文件解析失败：' + error.message })
+  }
+
+  const sheetName = workbook.SheetNames.find(name => name === '分类导入') || workbook.SheetNames[0]
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '', raw: false })
+  if (!rows.length) return res.status(400).json({ error: 'Excel 中没有数据行' })
+
+  const db = getDB()
+  const errors = []
+  let created = 0
+  let updated = 0
+
+  rows.forEach((raw, index) => {
+    const rowNo = index + 2
+    const value = key => String(raw[key] ?? '').trim()
+    const level1Name = value('一级分类名称')
+    const level2Name = value('二级分类名称')
+    const level3Name = value('三级分类名称')
+    const scoreRuleRaw = value('分值规则').toLowerCase()
+    const scoreRule = ['fixed', 'range', 'any'].includes(scoreRuleRaw)
+      ? scoreRuleRaw
+      : ({ '单值': 'fixed', '区间': 'range', '任意': 'any' }[value('分值规则')] || 'fixed')
+    const scoreValue = Number(value('分值下限/固定分值') || 0)
+    const scoreUpper = Number(value('分值上限') || 0)
+
+    if (!level1Name) {
+      errors.push({ row: rowNo, message: '一级分类名称为必填项' })
+      return
+    }
+    if (level2Name && !level3Name) {
+      errors.push({ row: rowNo, message: '已填写二级分类时，三级分类名称不能为空' })
+      return
+    }
+    if (scoreRule === 'range' && (!Number.isFinite(scoreValue) || !Number.isFinite(scoreUpper) || scoreValue > scoreUpper)) {
+      errors.push({ row: rowNo, message: '分值区间无效，下限必须不大于上限' })
+      return
+    }
+
+    let level1 = categoryByLevelAndName(db, 1, level1Name)
+    if (!level1) {
+      db.run(`INSERT INTO dict_categories (level, parent_id, name, score_rule, sort_order, active)
+              VALUES (1, NULL, ?, 'fixed', ?, 1)`, [level1Name, index + 1])
+      level1 = categoryByLevelAndName(db, 1, level1Name)
+      created++
+    }
+    if (!level2Name) return
+
+    let level2 = categoryByLevelAndName(db, 2, level2Name, level1.id)
+    if (!level2) {
+      db.run(`INSERT INTO dict_categories (level, parent_id, name, score_rule, sort_order, active)
+              VALUES (2, ?, ?, 'fixed', ?, 1)`, [level1.id, level2Name, index + 1])
+      level2 = categoryByLevelAndName(db, 2, level2Name, level1.id)
+      created++
+    }
+
+    const existing = categoryByLevelAndName(db, 3, level3Name, level2.id)
+    if (existing) {
+      db.run(`UPDATE dict_categories SET score_rule = ?, score_value = ?, score_upper = ?, active = 1 WHERE id = ?`,
+        [scoreRule, scoreValue, scoreUpper, existing.id])
+      updated++
+    } else {
+      db.run(`INSERT INTO dict_categories (level, parent_id, name, score_rule, score_value, score_upper, sort_order, active)
+              VALUES (3, ?, ?, ?, ?, ?, ?, 1)`,
+        [level2.id, level3Name, scoreRule, scoreValue, scoreUpper, index + 1])
+      created++
+    }
+  })
+
+  res.json({
+    success: true,
+    total: rows.length,
+    created,
+    updated,
+    failed: errors.length,
+    errors
+  })
+})
+
+// GET /api/dictionary/report - full task report expanded by subtask/output
 router.get('/report', authMiddleware, (req, res) => {
   const db = getDB()
   const { user_id, l1, l2, l3, start_date, end_date, status } = req.query
 
   let sql = `
-    SELECT o.id, o.task_id, o.user_id, o.content, o.status, o.score_value, o.score_quantity, o.score_total, o.score_rule,
-           o.category_l1, o.category_l2, o.category_l3, o.created_at, o.reviewed_at,
-           u.name as user_name, u.department,
-           t.title as task_title, t.task_type as task_type, t.created_at as task_created_at,
-           t.deadline as task_deadline, t.status as task_status, t.supervisor_id as task_supervisor_id,
-           t.publisher_id as task_publisher_id, t.wbs_project_ids as task_wbs_project_ids, t.wbs_car_ids as task_wbs_car_ids,
+    SELECT o.id as output_id, o.user_id, o.content, o.status, o.score_value, o.score_quantity,
+           o.score_total, o.score_rule, o.category_l1, o.category_l2, o.category_l3,
+           o.created_at, o.reviewed_at,
+           ou.name as user_name,
+           s.id as row_subtask_id, s.title as subtask_title, s.deadline as subtask_deadline,
+           su.id as subtask_assignee_id, su.name as subtask_assignee_name,
+           t.id as task_id, t.title as task_title, t.description as task_description,
+           t.task_type as task_type, t.management_category, t.management_detail,
+           t.created_at as task_created_at, t.deadline as task_deadline,
+           t.status as task_status, t.progress as task_progress,
+           t.supervisor_id as task_supervisor_id, t.publisher_id as task_publisher_id,
+           t.wbs_project_ids as task_wbs_project_ids, t.wbs_car_ids as task_wbs_car_ids,
            sup.name as supervisor_name,
            pub.name as publisher_name
-    FROM task_outputs o
-    LEFT JOIN users u ON o.user_id = u.id
-    LEFT JOIN tasks t ON o.task_id = t.id
+    FROM tasks t
+    LEFT JOIN subtasks s ON s.task_id = t.id
+    LEFT JOIN users su ON s.assignee_id = su.id
+    LEFT JOIN task_outputs o ON o.task_id = t.id
+      AND (o.subtask_id = s.id OR (s.id IS NULL AND o.subtask_id IS NULL))
+    LEFT JOIN users ou ON o.user_id = ou.id
     LEFT JOIN users sup ON t.supervisor_id = sup.id
     LEFT JOIN users pub ON t.publisher_id = pub.id
     WHERE 1=1
   `
   const params = []
-  if (user_id) { sql += ' AND o.user_id = ?'; params.push(Number(user_id)) }
+  if (user_id) {
+    sql += ' AND (s.assignee_id = ? OR o.user_id = ?)'
+    params.push(Number(user_id), Number(user_id))
+  }
+  if (l1 || l2 || l3) sql += ' AND o.id IS NOT NULL'
   if (l1) { sql += ' AND o.category_l1 = ?'; params.push(Number(l1)) }
   if (l2) { sql += ' AND o.category_l2 = ?'; params.push(Number(l2)) }
   if (l3) { sql += ' AND o.category_l3 = ?'; params.push(Number(l3)) }
   if (status) { sql += ' AND o.status = ?'; params.push(status) }
-  if (start_date) { sql += ' AND date(o.created_at) >= date(?)'; params.push(start_date) }
-  if (end_date) { sql += ' AND date(o.created_at) <= date(?)'; params.push(end_date) }
-  sql += ' ORDER BY o.created_at DESC'
+  if (start_date) {
+    sql += ' AND (date(o.created_at) >= date(?) OR (o.id IS NULL AND date(t.created_at) >= date(?)))'
+    params.push(start_date, start_date)
+  }
+  if (end_date) {
+    sql += ' AND (date(o.created_at) <= date(?) OR (o.id IS NULL AND date(t.created_at) <= date(?)))'
+    params.push(end_date, end_date)
+  }
+  sql += ' ORDER BY t.id DESC, s.id ASC, o.created_at DESC'
 
   const stmt = db.prepare(sql)
   stmt.bind(params)
@@ -182,10 +316,15 @@ router.get('/report', authMiddleware, (req, res) => {
   while (stmt.step()) {
     const row = stmt.getAsObject()
     rows.push({
-      id: row.id,
+      id: row.output_id,
+      outputId: row.output_id,
       taskId: row.task_id,
       taskTitle: row.task_title,
+      taskDescription: row.task_description || '',
+      taskProgress: row.task_progress || 0,
       taskType: row.task_type,
+      managementCategory: row.management_category || '',
+      managementDetail: row.management_detail || '',
       taskCreatedAt: row.task_created_at,
       taskDeadline: row.task_deadline,
       taskStatus: row.task_status,
@@ -196,6 +335,11 @@ router.get('/report', authMiddleware, (req, res) => {
       userId: row.user_id,
       userName: row.user_name,
       department: row.department,
+      subtaskId: row.row_subtask_id,
+      subtaskTitle: row.subtask_title || '',
+      subtaskDeadline: row.subtask_deadline || '',
+      subtaskAssigneeId: row.subtask_assignee_id,
+      subtaskAssigneeName: row.subtask_assignee_name || '',
       content: row.content,
       status: row.status,
       scoreValue: row.score_value || 0,
@@ -280,9 +424,11 @@ router.get('/report', authMiddleware, (req, res) => {
   for (const r of rows) {
     count++
     grandTotal += r.scoreTotal || 0
-    if (r.userId) {
-      const key = r.userId
-      if (!byUser[key]) byUser[key] = { userId: r.userId, userName: r.userName, count: 0, total: 0 }
+    const userId = r.subtaskAssigneeId || r.userId
+    const userName = r.subtaskAssigneeName || r.userName
+    if (userId) {
+      const key = userId
+      if (!byUser[key]) byUser[key] = { userId, userName, count: 0, total: 0 }
       byUser[key].count++
       byUser[key].total += r.scoreTotal || 0
     }

@@ -11,6 +11,13 @@
         新增分类
       </button>
       <span class="hint">维护一/二/三级分类，并配置每个三级条目的参考分值规则</span>
+      <button class="btn" :disabled="importing" @click="downloadImportTemplate">
+        {{ importing ? '处理中...' : '📥 下载导入模板' }}
+      </button>
+      <button class="btn" :disabled="importing" @click="triggerImport">
+        {{ importing ? '导入中...' : '📤 Excel导入' }}
+      </button>
+      <input ref="importInputRef" type="file" accept=".xlsx,.xls" class="hidden-file-input" @change="handleImportFile" />
     </div>
 
     <div class="search-toolbar">
@@ -68,6 +75,26 @@
         </span>
         <button class="btn btn-sm" @click="clearAllFilters">清除所有</button>
       </div>
+    </div>
+
+    <div v-if="importResult" class="import-panel">
+      <div class="import-panel-head">
+        <strong>导入结果</strong>
+        <button class="btn btn-sm" @click="importResult = null">关闭</button>
+      </div>
+      <p class="import-summary">
+        共 {{ importResult.total }} 条，新建 <b class="ok">{{ importResult.created }}</b> 条，
+        更新 <b class="ok">{{ importResult.updated }}</b> 条，失败 <b :class="importResult.failed ? 'fail' : ''">{{ importResult.failed }}</b> 条
+      </p>
+      <ul v-if="importResult.errors?.length" class="import-errors">
+        <li v-for="(error, index) in importResult.errors" :key="index">
+          第 {{ error.row }} 行：{{ error.message }}
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="importError" class="import-panel">
+      <strong class="fail">{{ importError }}</strong>
     </div>
 
     <div class="card table-card">
@@ -248,6 +275,10 @@ const loading = ref(true)
 const showDialog = ref(false)
 const editing = ref(null)
 const saving = ref(false)
+const importInputRef = ref(null)
+const importing = ref(false)
+const importResult = ref(null)
+const importError = ref('')
 const formError = ref('')
 const searchQuery = ref('')
 const activeFilters = reactive({
@@ -452,6 +483,56 @@ function openCreateDialog() {
   showDialog.value = true
 }
 
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function downloadImportTemplate() {
+  importing.value = true
+  try {
+    const blob = await dictionaryAPI.downloadImportTemplate()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'dictionary-import-template.xlsx'
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    importError.value = error.message || '模板下载失败'
+  } finally {
+    importing.value = false
+  }
+}
+
+function triggerImport() {
+  importError.value = ''
+  importResult.value = null
+  importInputRef.value?.click()
+}
+
+async function handleImportFile(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importing.value = true
+  importError.value = ''
+  importResult.value = null
+  try {
+    const fileBase64 = await readFileAsBase64(file)
+    importResult.value = await dictionaryAPI.import(fileBase64)
+    await loadTree()
+  } catch (error) {
+    importError.value = error.message || '导入失败'
+  } finally {
+    importing.value = false
+  }
+}
+
 function openEditDialog(node) {
   editing.value = node
   // 解析节点的层级名称
@@ -598,6 +679,15 @@ onMounted(loadTree)
 .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--primary-light); color: var(--primary); border-radius: 12px; font-size: 12px; }
 .filter-chip button { background: none; border: none; cursor: pointer; color: inherit; padding: 0; line-height: 1; }
+.toolbar .btn { border-color: rgba(255,255,255,.6); color: #fff; background: rgba(255,255,255,.14); }
+.toolbar .btn:hover { background: rgba(255,255,255,.26); }
+.hidden-file-input { display: none; }
+.import-panel { background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 12px 16px; }
+.import-panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.import-summary { margin: 0; font-size: 13px; color: var(--text); }
+.import-errors { margin: 8px 0 0; padding-left: 20px; font-size: 12px; color: var(--danger); }
+.ok { color: var(--success); }
+.fail { color: var(--danger); }
 
 .card { background: #fff; border-radius: var(--radius); box-shadow: 0 1px 4px rgba(0,0,0,0.04); overflow: hidden; }
 .table-wrap { overflow-x: auto; }
