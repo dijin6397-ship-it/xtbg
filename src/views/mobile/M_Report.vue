@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <div class="page-header" style="padding-bottom: 16px">
-      <div class="m-back-row" @click="$router.back()">
+      <div class="m-back-row" @click="goBack">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         <span style="font-size: 13px">返回</span>
       </div>
@@ -114,8 +114,11 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { dictionaryAPI, userAPI } from '../../api/index.js'
 import { taskTypeMap, statusMap } from '../../store/auth.js'
+
+const router = useRouter()
 
 const filters = reactive({ userId: '', l1: '', l2: '', l3: '', startDate: '', endDate: '' })
 const userOptions = ref([])
@@ -189,6 +192,11 @@ async function loadReport() {
 }
 
 onMounted(async () => { await Promise.all([loadUsers(), loadCategories()]); await loadReport() })
+
+function goBack() {
+  if (window.history.state?.back) router.back()
+  else router.push('/m/tasks')
+}
 </script>
 
 <style scoped>
@@ -198,8 +206,8 @@ onMounted(async () => { await Promise.all([loadUsers(), loadCategories()]); awai
 .form-row { display: flex; gap: 8px; }
 
 .form-input-m, .form-select-m {
-  width: 100%; height: 36px; border: 1px solid var(--border); border-radius: 8px;
-  padding: 0 12px; font-size: 13px; box-sizing: border-box; background: #fff; outline: none;
+  width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-size: 14px; box-sizing: border-box; background: #fff; outline: none;
 }
 .form-select-m {
   padding: 0 28px 0 10px;
@@ -210,7 +218,7 @@ onMounted(async () => { await Promise.all([loadUsers(), loadCategories()]); awai
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  min-height: 44px; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 500;
   cursor: pointer; border: 1px solid var(--border); background: #fff; color: var(--text);
 }
 .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }

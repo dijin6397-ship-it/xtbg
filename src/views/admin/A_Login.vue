@@ -83,7 +83,7 @@ async function handleLogin() {
   padding: 20px;
 }
 .login-card {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.96);
   border-radius: 16px;
   padding: 48px 40px;
   width: 400px;
@@ -121,7 +121,7 @@ async function handleLogin() {
   display: block;
   font-size: 13px;
   font-weight: 500;
-  color: #1d2129;
+  color: #17233d;
   margin-bottom: 8px;
 }
 .form-input {
@@ -132,7 +132,7 @@ async function handleLogin() {
   border-radius: 8px;
   font-size: 14px;
   color: #1d2129;
-  background: #f7f8fa;
+  background: #fff;
   outline: none;
   transition: all 0.2s;
   box-sizing: border-box;
@@ -143,10 +143,16 @@ async function handleLogin() {
   box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.1);
 }
 .error-msg {
-  color: #ff4d4f;
-  font-size: 13px;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: #d93026;
+  background: #fff2f0;
+  border: 1px solid #ffccc7;
+  border-radius: 8px;
+  font-size: 14px;
   margin-bottom: 16px;
   text-align: center;
+  box-sizing: border-box;
 }
 .btn-login {
   width: 100%;
@@ -167,7 +173,7 @@ async function handleLogin() {
 }
 .btn-login:active:not(:disabled) { transform: translateY(1px); }
 .btn-login:disabled {
-  opacity: 0.6;
+  opacity: 0.78;
   cursor: not-allowed;
 }
 .login-footer {
@@ -175,8 +181,8 @@ async function handleLogin() {
   text-align: center;
 }
 .login-footer p {
-  font-size: 12px;
-  color: #c9cdd4;
+  font-size: 13px;
+  color: #3d557a;
   margin: 0;
 }
 

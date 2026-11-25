@@ -193,6 +193,7 @@ function getFullTask(db, taskId) {
 
   task.publisher = getUserById(db, task.publisher_id)
   task.supervisor = getUserById(db, task.supervisor_id)
+  task.createdAt = task.created_at
   if (task.assignee_id) {
     task.direct_assignee = getUserById(db, task.assignee_id)
   }

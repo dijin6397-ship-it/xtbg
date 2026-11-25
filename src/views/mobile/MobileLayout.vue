@@ -21,12 +21,20 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { store } from '../../store/tasks.js'
+import { taskAPI } from '../../api/index.js'
 import logoImg from '../../assets/logo.jpg'
 
 const route = useRoute()
+
+onMounted(async () => {
+  try {
+    const data = await taskAPI.list()
+    store.tasks = data.tasks || []
+  } catch (e) { console.error(e) }
+})
 
 const overdueCount = computed(() =>
   store.tasks.filter(t => t.status === 'overdue' || (t.urgCount >= 3 && t.status !== 'completed')).length

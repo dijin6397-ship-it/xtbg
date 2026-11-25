@@ -2,7 +2,7 @@
   <div class="page" v-if="task && !isDailyManagement">
     <!-- Header -->
     <div class="page-header" style="padding-bottom: 16px">
-      <div class="m-back-row" @click="$router.back()">
+      <div class="m-back-row" @click="goBack">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         <span style="font-size: 13px">返回</span>
       </div>
@@ -69,7 +69,7 @@
 
   <!-- 部门日常管理：不需要新增子任务分配 -->
   <div v-else-if="task && isDailyManagement" class="page" style="padding: 16px">
-    <div class="m-back-row" @click="$router.back()">
+      <div class="m-back-row" @click="goBack">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
       <span style="font-size: 13px">返回</span>
     </div>
@@ -126,6 +126,11 @@ function finishDecompose() {
     updateTaskStatus(task.value.id, 'decomposing')
   }
   router.push(`/m/task/${task.value.id}`)
+}
+
+function goBack() {
+  if (window.history.state?.back) router.back()
+  else router.push(`/m/task/${task.value.id}`)
 }
 </script>
 

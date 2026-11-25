@@ -5,8 +5,8 @@
   --warning: #fa8c16;
   --success: #52c41a;
   --text: #1d2129;
-  --text-secondary: #86909c;
-  --text-caption: #c9cdd4;
+  --text-secondary: #5c6776;
+  --text-caption: #7c8795;
   --bg: #f5f7fa;
   --card: #ffffff;
   --border: #e5e6eb;
@@ -66,11 +66,21 @@ body {
   transform: scale(0.98);
 }
 
+.m-task-card {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.m-task-card:active {
+  transform: scale(0.99);
+  border-color: rgba(22, 119, 255, 0.36);
+}
+
 .tag {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 18px;
 }
@@ -86,6 +96,7 @@ body {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition: opacity 0.2s;
 }
 
@@ -108,10 +119,66 @@ body {
   border: 1px solid var(--primary);
 }
 
+.btn-warning,
+.btn-success {
+  color: #fff;
+}
+
+.btn-warning { background: #d48806; border-color: #d48806; }
+.btn-success { background: #389e0d; border-color: #389e0d; }
+
+.btn-light {
+  background: #fff;
+  color: #1d2129;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+.btn-light:hover:not(:disabled) {
+  background: #e6f4ff;
+  color: #0958d9;
+  border-color: #fff;
+}
+
+.btn-export {
+  min-height: 44px;
+  background: #389e0d;
+  color: #fff;
+  border: 1px solid #389e0d;
+}
+
+.btn-export:hover:not(:disabled) { background: #52c41a; border-color: #52c41a; }
+
+.btn-template {
+  min-height: 44px;
+  background: #fff;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+}
+
+.btn-template:hover:not(:disabled),
+.btn-edit:hover { background: var(--primary-light); }
+
+.btn-edit {
+  min-height: 44px;
+  color: #0958d9;
+  border: 1px solid #91caff;
+  background: #fff;
+}
+
+.btn-urge {
+  min-height: 44px;
+  min-width: 44px;
+  color: #d48806;
+  border: 1px solid #ffd591;
+  background: #fff;
+}
+
+.btn-urge:hover { background: #fffbe6; color: #d48806; }
+
 .btn-sm {
-  height: 30px;
-  padding: 0 12px;
-  font-size: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 13px;
   border-radius: 6px;
 }
 
@@ -185,8 +252,9 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 56px;
-  font-size: 10px;
+  height: 60px;
+  min-height: 48px;
+  font-size: 11px;
   color: var(--text-secondary);
   text-decoration: none;
   position: relative;
@@ -234,9 +302,10 @@ body {
 
 .filter-tab {
   flex-shrink: 0;
-  padding: 6px 14px;
+  min-height: 44px;
+  padding: 10px 16px;
   border-radius: 20px;
-  font-size: 13px;
+  font-size: 14px;
   border: 1px solid var(--border);
   background: #fff;
   color: var(--text-secondary);
@@ -479,7 +548,9 @@ body {
 .back-btn {
   display: inline-flex; align-items: center; gap: 4px;
   background: none; border: none; padding: 0; cursor: pointer;
-  color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;
+  min-height: 44px;
+  padding: 0 8px;
+  color: #1d2129; font-size: 14px; margin-bottom: 8px;
   transition: color 0.18s;
 }
 .back-btn:hover { color: var(--primary); }
@@ -578,7 +649,41 @@ body {
 }
 .form-select { padding-right: 30px; }
 .form-textarea { line-height: 1.6; }
-.filter-tab { min-height: 32px; display: inline-flex; align-items: center; }
+.filter-tab { display: inline-flex; align-items: center; }
+
+/* ---------- Touch readability ---------- */
+.m-back-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 8px;
+  margin-left: -8px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.82);
+  color: #1d2129;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.m-back-row:active {
+  background: rgba(22, 119, 255, 0.12);
+  color: var(--primary);
+}
+
+.m-task-card-title {
+  color: var(--text);
+}
+
+.m-deadline,
+.m-urge-count {
+  color: var(--text-secondary);
+}
+
+.m-urge-count { color: var(--danger); font-weight: 600; }
 
 /* ---------- 头像与信息流 ---------- */
 .avatar { box-shadow: 0 0 0 2px #fff; }
